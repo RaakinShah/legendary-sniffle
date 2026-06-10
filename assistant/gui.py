@@ -82,14 +82,22 @@ def run() -> None:
         raise SystemExit(1)
 
     bridge = Bridge()
-    bridge.window = webview.create_window(
-        config.ASSISTANT_NAME,
+    kwargs = dict(
         html=HTML_PATH.read_text(),
         js_api=bridge,
         width=520,
         height=720,
         min_size=(380, 480),
     )
+    if sys.platform == "darwin":
+        # Native NSVisualEffectView blur behind a transparent page background.
+        kwargs.update(vibrancy=True, transparent=True)
+    try:
+        bridge.window = webview.create_window(config.ASSISTANT_NAME, **kwargs)
+    except TypeError:  # older pywebview without vibrancy/transparent kwargs
+        kwargs.pop("vibrancy", None)
+        kwargs.pop("transparent", None)
+        bridge.window = webview.create_window(config.ASSISTANT_NAME, **kwargs)
     webview.start()
 
 
