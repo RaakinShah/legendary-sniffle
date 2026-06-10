@@ -13,6 +13,7 @@ from claude_agent_sdk import (
     AssistantMessage,
     ClaudeSDKClient,
     ResultMessage,
+    StreamEvent,
     TextBlock,
     ToolUseBlock,
 )
@@ -21,6 +22,7 @@ from . import config
 from .agent import build_options
 
 HTML_PATH = Path(__file__).parent / "static" / "chat.html"
+_lock_file = None  # held for process lifetime (single-instance guard)
 
 
 class Bridge:
@@ -38,16 +40,30 @@ class Bridge:
 
     async def _client_ready(self) -> ClaudeSDKClient:
         if self.client is None:
-            self.client = ClaudeSDKClient(options=build_options())
+            self.client = ClaudeSDKClient(options=build_options(partial_messages=True))
             await self.client.connect()
         return self.client
+
+    async def _drop_client(self) -> None:
+        if self.client is not None:
+            try:
+                await self.client.disconnect()
+            except Exception:
+                pass
+            self.client = None
 
     async def _run(self, text: str) -> None:
         try:
             client = await self._client_ready()
             await client.query(text)
             async for m in client.receive_response():
-                if isinstance(m, AssistantMessage):
+                if isinstance(m, StreamEvent):
+                    ev = m.event or {}
+                    if ev.get("type") == "content_block_delta":
+                        delta = ev.get("delta", {})
+                        if delta.get("type") == "text_delta" and delta.get("text"):
+                            self._js("streamText", delta["text"])
+                elif isinstance(m, AssistantMessage):
                     for b in m.content:
                         if isinstance(b, TextBlock):
                             self._js("appendText", b.text)
@@ -55,7 +71,8 @@ class Bridge:
                             self._js("appendTool", b.name)
                 elif isinstance(m, ResultMessage):
                     self._js("done", "" if m.subtype == "success" else m.subtype)
-        except Exception as exc:  # surface errors in the UI instead of dying silently
+        except Exception as exc:  # surface the error, reset so the next message recovers
+            await self._drop_client()
             self._js("appendText", f"⚠️ {exc}")
             self._js("done", "error")
 
@@ -67,6 +84,10 @@ class Bridge:
     def resize(self, width: int, height: int) -> str:
         if self.window:
             self.window.resize(int(width), int(height))
+        return "ok"
+
+    def new_chat(self) -> str:
+        asyncio.run_coroutine_threadsafe(self._drop_client(), self.loop)
         return "ok"
 
     def hide_window(self) -> str:
@@ -102,6 +123,19 @@ def run() -> None:
     except ImportError:
         print("pywebview not installed. Run: pip install -e '.[gui]'", file=sys.stderr)
         raise SystemExit(1)
+
+    # Single instance: the login agent and a manual launch shouldn't both run.
+    config.ensure_dirs()
+    global _lock_file
+    _lock_file = open(config.ASSISTANT_HOME / "gui.lock", "w")
+    try:
+        import fcntl
+        fcntl.flock(_lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        print(f"{config.ASSISTANT_NAME} is already running (press Option+Space).", file=sys.stderr)
+        raise SystemExit(0)
+    except ImportError:
+        pass
 
     bridge = Bridge()
     # Siri-style summon pill, centered near the top of the screen; expands to a panel.

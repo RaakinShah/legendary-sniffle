@@ -130,7 +130,11 @@ small questions. Ask at most one clarifying question, and only when genuinely ne
 {MACOS_PLAYBOOK if sys.platform == "darwin" else ""}{extra}"""
 
 
-def build_options(extra_system: str = "", max_turns: int | None = None) -> ClaudeAgentOptions:
+def build_options(
+    extra_system: str = "",
+    max_turns: int | None = None,
+    partial_messages: bool = False,
+) -> ClaudeAgentOptions:
     config.ensure_dirs()
     memory.seed()
 
@@ -157,4 +161,5 @@ def build_options(extra_system: str = "", max_turns: int | None = None) -> Claud
         cwd=str(config.ASSISTANT_HOME),
         add_dirs=dirs,
         max_turns=max_turns,
+        include_partial_messages=partial_messages,
     )
