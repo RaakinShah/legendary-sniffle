@@ -69,6 +69,23 @@ class Bridge:
             self.window.resize(int(width), int(height))
         return "ok"
 
+    def hide_window(self) -> str:
+        if self.window:
+            self.visible = False
+            self.window.hide()
+        return "ok"
+
+    def toggle_window(self) -> None:
+        if not self.window:
+            return
+        if getattr(self, "visible", True):
+            self.visible = False
+            self.window.hide()
+        else:
+            self.visible = True
+            self.window.show()
+            self.window.evaluate_js("focusInput && focusInput()")
+
     def greet(self) -> str:
         return self.send(
             "Session started. Greet me briefly; if anything is overdue or due today, "
@@ -114,7 +131,20 @@ def run() -> None:
         for k in ("vibrancy", "transparent", "frameless", "easy_drag", "x", "y"):
             kwargs.pop(k, None)
         bridge.window = webview.create_window(config.ASSISTANT_NAME, **kwargs)
-    webview.start()
+    bridge.visible = True
+    webview.start(_install_hotkey, bridge)
+
+
+def _install_hotkey(bridge: Bridge) -> None:
+    """Global ⌥Space summon/dismiss. Needs Accessibility permission on macOS."""
+    try:
+        from pynput import keyboard
+    except ImportError:
+        return
+    try:
+        keyboard.GlobalHotKeys({"<alt>+<space>": bridge.toggle_window}).start()
+    except Exception as exc:
+        print(f"Hotkey unavailable: {exc}", file=sys.stderr)
 
 
 if __name__ == "__main__":

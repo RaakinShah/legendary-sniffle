@@ -353,7 +353,12 @@
   input.addEventListener('input', () => {
     input.style.height = 'auto'; input.style.height = input.scrollHeight + 'px';
   });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape' && state === 'panel') setState('pill'); });
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    if (state === 'panel') setState('pill');
+    else try { pywebview.api.hide_window(); } catch (err) {}   // Esc in pill = dismiss; ⌥Space brings it back
+  });
+  window.focusInput = () => (state === 'pill' ? pillInput : input).focus();
 
   window.addEventListener('pywebviewready', () => { setBusy(true); pywebview.api.greet(); });
 </script>
