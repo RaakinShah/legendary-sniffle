@@ -16,7 +16,7 @@ Done — task #4, due 2026-06-11T15:00. I'll surface it in tomorrow's briefing t
 
 | Piece | What it does |
 |---|---|
-| `assistant-gui` | Siri-style floating "Ask Aide" pill — summon/dismiss anywhere with ⌥Space (grant Accessibility permission), Esc to dismiss, expands into a chat panel |
+| `assistant-gui` | Siri-style floating "Ask Aide" pill — summon/dismiss anywhere with ⌥Space, Esc to dismiss. Expands (⤢) into a full sidebar app with New Chat, Search, Routines, Favorites, and saved conversation history you can reopen and continue |
 | On-screen awareness | The 👁 button (or just asking "help with this") captures your screen so Aide can see what you see — grant Screen Recording permission on first use |
 | Personal context | Searches your files (Spotlight), Calendar, Reminders, Notes, Mail, and Contacts via system APIs; drafts emails and creates events for you (always confirms before sending) |
 | Ambient recall | Continuously remembers what's on your screen (OCR'd, full-text searchable, 30 days, 100% local). Skips private browsing and password managers; pause from the panel (eye button) or say "forget the last hour" |

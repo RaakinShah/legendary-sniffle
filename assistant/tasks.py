@@ -90,13 +90,11 @@ def list_tasks(status: str = "open") -> list[Task]:
 
 def complete(task_id: int) -> Task:
     with _conn() as conn:
-        cur = conn.execute(
+        conn.execute(
             "UPDATE tasks SET status = 'done', completed_at = ? WHERE id = ? AND status != 'done'",
             (dt.datetime.now().isoformat(timespec="seconds"), task_id),
         )
-        if cur.rowcount == 0:
-            # Either missing (get() raises KeyError) or already done (return as-is)
-            return get(task_id, conn)
+        # get() raises KeyError if the id never existed; already-done tasks return as-is.
         return get(task_id, conn)
 
 

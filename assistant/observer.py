@@ -17,12 +17,10 @@ import time
 
 from . import config
 
-_env = __import__("os").environ
-OBSERVE_EVERY = int(_env.get("ASSISTANT_OBSERVE_SECONDS", "5"))   # near-continuous sampling
+OBSERVE_EVERY = config.RECALL_OBSERVE_SECONDS   # near-continuous sampling
 SHOT_EVERY = 60         # heartbeat: at most this long between OCR shots
 MIN_SHOT_GAP = 8        # debounce: at least this long between OCR shots
-# Long memory by default: 30 days (ASSISTANT_RECALL_DAYS to change).
-RETAIN_HOURS = 24 * int(_env.get("ASSISTANT_RECALL_DAYS", "30"))
+RETAIN_HOURS = config.RECALL_RETAIN_HOURS
 SHOT_DIR = config.ASSISTANT_HOME / "recall"
 DB = config.ASSISTANT_HOME / "recall.db"
 
@@ -43,9 +41,8 @@ def set_paused(value: bool) -> bool:
 def _is_private(app: str, title: str) -> bool:
     """Littlebird-style selective visibility: never record private contexts."""
     hay = f"{app} {title}".lower()
-    if any(m in title.lower() for m in PRIVATE_MARKERS):
-        return True
-    return any(x in hay for x in config.RECALL_EXCLUDE)
+    return (any(m in hay for m in PRIVATE_MARKERS)
+            or any(x in hay for x in config.RECALL_EXCLUDE))
 
 
 def _conn() -> sqlite3.Connection:

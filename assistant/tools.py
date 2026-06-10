@@ -10,13 +10,7 @@ from typing import Any
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
 from . import memory, tasks
-
-
-def _text(message: str, is_error: bool = False) -> dict[str, Any]:
-    result: dict[str, Any] = {"content": [{"type": "text", "text": message}]}
-    if is_error:
-        result["is_error"] = True
-    return result
+from .util import text_result as _text
 
 
 @tool(

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import sys
 import threading
 from pathlib import Path
@@ -18,11 +17,17 @@ from claude_agent_sdk import (
     ToolUseBlock,
 )
 
-from . import config
+from . import config, history, observer
 from .agent import build_options
 
 HTML_PATH = Path(__file__).parent / "static" / "chat.html"
 _lock_file = None  # held for process lifetime (single-instance guard)
+
+
+def _radius(height: int) -> float:
+    """Capsule for the pill, rounded panel otherwise."""
+    return height / 2.0 if height <= 110 else 28.0
+
 
 LOW_CREDIT_TIP = """💡 **Your API account is out of credits.** To run me on your \
 Claude Pro/Max subscription instead:
@@ -36,7 +41,11 @@ class Bridge:
 
     def __init__(self) -> None:
         self.window = None
+        self.visible = True
         self.client: ClaudeSDKClient | None = None
+        self.conv_id: int | None = None
+        self.session_id: str | None = None
+        self._buf = ""  # accumulates the current assistant reply for persistence
         self.loop = asyncio.new_event_loop()
         threading.Thread(target=self.loop.run_forever, daemon=True).start()
 
@@ -46,7 +55,9 @@ class Bridge:
 
     async def _client_ready(self) -> ClaudeSDKClient:
         if self.client is None:
-            self.client = ClaudeSDKClient(options=build_options(partial_messages=True))
+            self.client = ClaudeSDKClient(
+                options=build_options(partial_messages=True, resume=self.session_id)
+            )
             await self.client.connect()
         return self.client
 
@@ -58,21 +69,17 @@ class Bridge:
                 pass
             self.client = None
 
-    @staticmethod
-    def _with_context(text: str) -> str:
+    def _with_context(self, text: str) -> str:
         """Littlebird-style: every message carries what the user is doing right now."""
         if sys.platform != "darwin" or not config.RECALL:
             return text
-        try:
-            from . import observer
-            ctx = observer.current_context()
-        except Exception:
-            ctx = ""
+        ctx = observer.current_context()
         if not ctx:
             return text
         return f"{text}\n\n[Ambient context, auto-attached — not typed by the user: {ctx}]"
 
-    async def _run(self, text: str) -> None:
+    async def _run(self, text: str, persist: bool = True) -> None:
+        self._buf = ""
         try:
             client = await self._client_ready()
             await client.query(self._with_context(text))
@@ -87,20 +94,79 @@ class Bridge:
                     for b in m.content:
                         if isinstance(b, TextBlock):
                             self._js("appendText", b.text)
+                            self._buf += ("\n\n" if self._buf else "") + b.text
                             if "credit balance is too low" in b.text.lower():
                                 self._js("appendText", LOW_CREDIT_TIP)
                         elif isinstance(b, ToolUseBlock):
                             self._js("appendTool", b.name)
                 elif isinstance(m, ResultMessage):
+                    if m.session_id:
+                        self.session_id = m.session_id
+                        if self.conv_id:
+                            history.set_session(self.conv_id, m.session_id)
                     self._js("done", "" if m.subtype == "success" else m.subtype)
         except Exception as exc:  # surface the error, reset so the next message recovers
             await self._drop_client()
             self._js("appendText", f"⚠️ {exc}")
             self._js("done", "error")
+        if persist and self.conv_id and self._buf:
+            history.append(self.conv_id, "assistant", self._buf)
 
     # --- methods callable from JS ---
     def send(self, text: str) -> str:
+        if self.conv_id is None:
+            self.conv_id = history.create()
+            history.set_title(self.conv_id, text)
+        history.append(self.conv_id, "user", text)
         asyncio.run_coroutine_threadsafe(self._run(text), self.loop)
+        return "ok"
+
+    def greet(self) -> str:
+        # Ephemeral — not saved to history, no conversation created yet.
+        asyncio.run_coroutine_threadsafe(
+            self._run(
+                "Session started. Greet me briefly; if anything is overdue or due today, "
+                "surface it in one or two lines. If the ambient context shows I'm in the "
+                "middle of something, acknowledge it naturally and offer to help with it. "
+                "Then wait for my input.",
+                persist=False,
+            ),
+            self.loop,
+        )
+        return "ok"
+
+    def new_chat(self) -> str:
+        self.conv_id = None
+        self.session_id = None
+        asyncio.run_coroutine_threadsafe(self._drop_client(), self.loop)
+        return "ok"
+
+    def open_conversation(self, conv_id: int) -> dict:
+        data = history.get(int(conv_id))
+        if not data:
+            return {}
+        self.conv_id = data["id"]
+        self.session_id = data["session_id"]
+        asyncio.run_coroutine_threadsafe(self._drop_client(), self.loop)  # next send resumes
+        return data
+
+    def list_conversations(self) -> dict:
+        return {"recents": history.recents(), "favorites": history.favorites()}
+
+    def search_conversations(self, q: str) -> list:
+        return history.search(q)
+
+    def favorite_conversation(self, conv_id: int, favorite: bool) -> bool:
+        return history.set_favorite(int(conv_id), bool(favorite))
+
+    def rename_conversation(self, conv_id: int, title: str) -> str:
+        history.set_title(int(conv_id), title)
+        return "ok"
+
+    def delete_conversation(self, conv_id: int) -> str:
+        history.delete(int(conv_id))
+        if self.conv_id == int(conv_id):
+            self.new_chat()
         return "ok"
 
     def resize(self, width: int, height: int) -> str:
@@ -117,11 +183,10 @@ class Bridge:
                         nf = AppKit.NSMakeRect(
                             f.origin.x, f.origin.y + f.size.height - height, width, height
                         )
-                        radius = height / 2.0 if height <= 110 else 28.0
-                        win.contentView().layer().setCornerRadius_(radius)
+                        win.contentView().layer().setCornerRadius_(_radius(height))
                         eff = getattr(self, "_ns_effect", None)
                         if eff is not None:
-                            eff.layer().setCornerRadius_(radius)
+                            eff.layer().setCornerRadius_(_radius(height))
                         win.setFrame_display_animate_(nf, True, True)  # smooth native morph
                         win.invalidateShadow()
                     except Exception:
@@ -132,39 +197,11 @@ class Bridge:
                 pass
         if self.window:
             self.window.resize(width, height)
-            self._update_radius(height)
         return "ok"
-
-    def _update_radius(self, height: int) -> None:
-        """Keep the native rounded mask in sync: capsule for the pill, 28pt panel."""
-        win = getattr(self, "_ns_window", None)
-        if win is None:
-            return
-        try:
-            import AppKit
-
-            def apply():
-                try:
-                    radius = height / 2.0 if height <= 110 else 28.0
-                    win.contentView().layer().setCornerRadius_(radius)
-                    win.invalidateShadow()
-                except Exception:
-                    pass
-            AppKit.NSOperationQueue.mainQueue().addOperationWithBlock_(apply)
-        except Exception:
-            pass
 
     def toggle_recall(self) -> bool:
         """Flip the ambient observer from the UI. Returns True if now paused."""
-        try:
-            from . import observer
-            return observer.set_paused(not observer.paused)
-        except Exception:
-            return False
-
-    def new_chat(self) -> str:
-        asyncio.run_coroutine_threadsafe(self._drop_client(), self.loop)
-        return "ok"
+        return observer.set_paused(not observer.paused)
 
     def hide_window(self) -> str:
         if self.window:
@@ -175,21 +212,13 @@ class Bridge:
     def toggle_window(self) -> None:
         if not self.window:
             return
-        if getattr(self, "visible", True):
+        if self.visible:
             self.visible = False
             self.window.hide()
         else:
             self.visible = True
             self.window.show()
             self.window.evaluate_js("window.summon ? summon() : (window.focusInput && focusInput())")
-
-    def greet(self) -> str:
-        return self.send(
-            "Session started. Greet me briefly; if anything is overdue or due today, "
-            "surface it in one or two lines. If the ambient context shows I'm in the "
-            "middle of something, acknowledge it naturally and offer to help with it. "
-            "Then wait for my input."
-        )
 
 
 def run() -> None:
@@ -242,7 +271,6 @@ def run() -> None:
         for k in ("transparent", "frameless", "easy_drag", "on_top", "x", "y"):
             kwargs.pop(k, None)
         bridge.window = webview.create_window(config.ASSISTANT_NAME, **kwargs)
-    bridge.visible = True
     webview.start(_install_hotkey, bridge)
 
 
@@ -290,7 +318,7 @@ def _native_glass(bridge: Bridge) -> None:
 def _install_hotkey(bridge: Bridge) -> None:
     """Post-start setup: native glass, capture hooks, global ⌥Space summon/dismiss."""
     if sys.platform == "darwin":
-        from . import mac_tools, observer
+        from . import mac_tools
         mac_tools.before_capture = bridge.window.hide
         mac_tools.after_capture = bridge.window.show
         observer.start()   # ambient recall (ASSISTANT_RECALL=0 to disable)

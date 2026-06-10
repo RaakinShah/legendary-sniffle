@@ -8,13 +8,9 @@ matters into long-term memory, writes an evening digest to
 from __future__ import annotations
 
 import asyncio
-import datetime as dt
-import sys
 
-from claude_agent_sdk import ResultMessage, query
-
-from . import config, notify
-from .agent import build_options
+from . import config
+from .scheduled import run_job
 
 PROMPT_TEMPLATE = """Run my end-of-day distillation for {date}.
 
@@ -38,29 +34,14 @@ Finally output the digest text as your final message."""
 
 
 async def main() -> None:
-    if not config.auth_available():
-        print(config.AUTH_HELP, file=sys.stderr)
-        raise SystemExit(1)
-
-    today = dt.date.today().isoformat()
-    out_path = config.INSIGHTS_DIR / f"{today}.md"
-    prompt = PROMPT_TEMPLATE.format(date=today, path=out_path)
-
-    options = build_options(
-        extra_system="\nYou are running unattended as a scheduled insights job — do not ask questions.",
+    await run_job(
+        label="insights",
+        out_dir=config.INSIGHTS_DIR,
+        prompt_template=PROMPT_TEMPLATE,
         max_turns=40,
+        notify_title="Evening digest ready",
+        notify_message="Today is distilled — loose ends inside.",
     )
-
-    async for message in query(prompt=prompt, options=options):
-        if isinstance(message, ResultMessage):
-            if message.subtype == "success" and message.result:
-                print(message.result)
-            else:
-                print(f"Insights run ended: {message.subtype}", file=sys.stderr)
-
-    if out_path.exists():
-        print(f"\n(saved to {out_path})", file=sys.stderr)
-        notify.notify("Evening digest ready", "Today is distilled — loose ends inside.")
 
 
 def run() -> None:

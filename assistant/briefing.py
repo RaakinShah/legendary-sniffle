@@ -7,14 +7,9 @@ calendar/email, saves it to ~/.assistant/briefings/YYYY-MM-DD.md, and prints it.
 from __future__ import annotations
 
 import asyncio
-import datetime as dt
-import os
-import sys
 
-from claude_agent_sdk import ResultMessage, query
-
-from . import config, notify
-from .agent import build_options
+from . import config
+from .scheduled import run_job
 
 PROMPT_TEMPLATE = """Generate my daily briefing for {date}.
 
@@ -37,29 +32,14 @@ final message."""
 
 
 async def main() -> None:
-    if not config.auth_available():
-        print(config.AUTH_HELP, file=sys.stderr)
-        raise SystemExit(1)
-
-    today = dt.date.today().isoformat()
-    out_path = config.BRIEFINGS_DIR / f"{today}.md"
-    prompt = PROMPT_TEMPLATE.format(date=today, path=out_path)
-
-    options = build_options(
-        extra_system="\nYou are running unattended as a scheduled briefing job — do not ask questions.",
+    await run_job(
+        label="briefing",
+        out_dir=config.BRIEFINGS_DIR,
+        prompt_template=PROMPT_TEMPLATE,
         max_turns=30,
+        notify_title="Daily briefing ready",
+        notify_message="Saved to {path}",
     )
-
-    async for message in query(prompt=prompt, options=options):
-        if isinstance(message, ResultMessage):
-            if message.subtype == "success" and message.result:
-                print(message.result)
-            else:
-                print(f"Briefing run ended: {message.subtype}", file=sys.stderr)
-
-    if out_path.exists():
-        print(f"\n(saved to {out_path})", file=sys.stderr)
-        notify.notify("Daily briefing ready", f"Saved to {out_path}")
 
 
 def run() -> None:

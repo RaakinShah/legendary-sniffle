@@ -62,6 +62,8 @@ FULL_ACCESS = os.environ.get("ASSISTANT_FULL_ACCESS", "1") != "0"
 
 # Ambient recall: background observer remembers what you were doing (local only).
 RECALL = os.environ.get("ASSISTANT_RECALL", "1") != "0"
+RECALL_OBSERVE_SECONDS = int(os.environ.get("ASSISTANT_OBSERVE_SECONDS", "5"))
+RECALL_RETAIN_HOURS = 24 * int(os.environ.get("ASSISTANT_RECALL_DAYS", "30"))
 
 # Apps/window-title substrings the observer must never record (case-insensitive),
 # in addition to private/incognito browser windows. Extend via env, comma-separated.

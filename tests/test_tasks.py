@@ -3,19 +3,6 @@ import datetime as dt
 import pytest
 
 
-@pytest.fixture(autouse=True)
-def isolated_home(tmp_path, monkeypatch):
-    """Point ASSISTANT_HOME at a temp dir before importing modules under test."""
-    import assistant.config as config
-
-    monkeypatch.setattr(config, "ASSISTANT_HOME", tmp_path)
-    monkeypatch.setattr(config, "MEMORY_DIR", tmp_path / "memory")
-    monkeypatch.setattr(config, "JOURNAL_DIR", tmp_path / "memory" / "journal")
-    monkeypatch.setattr(config, "BRIEFINGS_DIR", tmp_path / "briefings")
-    monkeypatch.setattr(config, "DB_PATH", tmp_path / "assistant.db")
-    yield
-
-
 def test_add_and_list():
     from assistant import tasks
 

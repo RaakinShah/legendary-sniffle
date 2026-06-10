@@ -174,6 +174,7 @@ def build_options(
     extra_system: str = "",
     max_turns: int | None = None,
     partial_messages: bool = False,
+    resume: str | None = None,
 ) -> ClaudeAgentOptions:
     config.ensure_dirs()
     memory.seed()
@@ -204,4 +205,5 @@ def build_options(
         add_dirs=dirs,
         max_turns=max_turns,
         include_partial_messages=partial_messages,
+        resume=resume,
     )
