@@ -92,7 +92,27 @@ class Bridge:
     def resize(self, width: int, height: int) -> str:
         if self.window:
             self.window.resize(int(width), int(height))
+            self._update_radius(int(height))
         return "ok"
+
+    def _update_radius(self, height: int) -> None:
+        """Keep the native rounded mask in sync: capsule for the pill, 28pt panel."""
+        win = getattr(self, "_ns_window", None)
+        if win is None:
+            return
+        try:
+            import AppKit
+
+            def apply():
+                try:
+                    radius = height / 2.0 if height <= 110 else 28.0
+                    win.contentView().layer().setCornerRadius_(radius)
+                    win.invalidateShadow()
+                except Exception:
+                    pass
+            AppKit.NSOperationQueue.mainQueue().addOperationWithBlock_(apply)
+        except Exception:
+            pass
 
     def new_chat(self) -> str:
         asyncio.run_coroutine_threadsafe(self._drop_client(), self.loop)
@@ -176,12 +196,50 @@ def run() -> None:
     webview.start(_install_hotkey, bridge)
 
 
+def _native_glass(bridge: Bridge) -> None:
+    """Real macOS material: NSVisualEffectView blur clipped to a rounded mask,
+    with the native window shadow. Falls back silently to the CSS look."""
+    try:
+        import AppKit
+
+        def apply():
+            try:
+                win = AppKit.NSApp().windows()[0]
+                for w in AppKit.NSApp().windows():
+                    if w.title() == config.ASSISTANT_NAME:
+                        win = w
+                        break
+                content = win.contentView()
+                content.setWantsLayer_(True)
+                layer = content.layer()
+                layer.setCornerRadius_(win.frame().size.height / 2.0)  # starts as pill
+                layer.setMasksToBounds_(True)
+                material = getattr(AppKit, "NSVisualEffectMaterialUnderWindowBackground",
+                                   getattr(AppKit, "NSVisualEffectMaterialHUDWindow", 13))
+                effect = AppKit.NSVisualEffectView.alloc().initWithFrame_(content.bounds())
+                effect.setMaterial_(material)
+                effect.setBlendingMode_(AppKit.NSVisualEffectBlendingModeBehindWindow)
+                effect.setState_(AppKit.NSVisualEffectStateActive)
+                effect.setAutoresizingMask_(AppKit.NSViewWidthSizable | AppKit.NSViewHeightSizable)
+                content.addSubview_positioned_relativeTo_(effect, AppKit.NSWindowBelow, None)
+                win.setHasShadow_(True)
+                win.invalidateShadow()
+                bridge._ns_window = win
+                bridge.window.evaluate_js("window.nativeGlass && nativeGlass(true)")
+            except Exception:
+                pass
+        AppKit.NSOperationQueue.mainQueue().addOperationWithBlock_(apply)
+    except Exception:
+        pass
+
+
 def _install_hotkey(bridge: Bridge) -> None:
-    """Post-start setup: capture hooks + global ⌥Space summon/dismiss."""
+    """Post-start setup: native glass, capture hooks, global ⌥Space summon/dismiss."""
     if sys.platform == "darwin":
         from . import mac_tools
         mac_tools.before_capture = bridge.window.hide
         mac_tools.after_capture = bridge.window.show
+        _native_glass(bridge)
     try:
         from pynput import keyboard
     except ImportError:
