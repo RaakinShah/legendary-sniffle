@@ -16,7 +16,8 @@ Done — task #4, due 2026-06-11T15:00. I'll surface it in tomorrow's briefing t
 
 | Piece | What it does |
 |---|---|
-| `assistant` (CLI) | Interactive chat with full agent capabilities — file access, shell, web search |
+| `assistant-gui` | Native macOS chat window (WKWebView — no Electron), auto-starts at login |
+| `assistant` (CLI) | Same assistant in the terminal |
 | Memory | Markdown files in `~/.assistant/memory/` the agent reads at startup and updates as it learns about you |
 | Tasks | SQLite store in `~/.assistant/assistant.db`, managed via custom tools |
 | Connectors | Any MCP server (Gmail, Google Calendar, Slack, ...) plugged in via `mcp_servers.json` |
@@ -42,6 +43,19 @@ assistant          # start chatting
 ```
 
 Run the tests (no API key needed): `pytest`
+
+## macOS GUI
+
+```bash
+pip install -e ".[gui]"
+assistant-gui                  # open the chat window
+./scripts/install_macos.sh 07:30   # full integration via launchd:
+```
+
+The install script sets up two login agents: the chat window opens automatically at
+login, and the daily briefing runs every morning and pops a macOS notification when
+it's ready. Logs land in `~/.assistant/`. To remove:
+`launchctl unload ~/Library/LaunchAgents/com.aide.*.plist && rm ~/Library/LaunchAgents/com.aide.*.plist`
 
 ## Connecting your life (email, calendar, anything)
 

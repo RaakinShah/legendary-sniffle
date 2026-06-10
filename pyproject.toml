@@ -13,10 +13,15 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+gui = ["pywebview>=5.0"]
 
 [project.scripts]
 assistant = "assistant.cli:run"
+assistant-gui = "assistant.gui:run"
 assistant-briefing = "assistant.briefing:run"
 
 [tool.setuptools.packages.find]
 include = ["assistant*"]
+
+[tool.setuptools.package-data]
+assistant = ["static/*.html"]

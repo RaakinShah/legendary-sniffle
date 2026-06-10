@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; display: flex; flex-direction: column; height: 100vh;
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: light-dark(#f5f5f7, #1c1c1e); color: light-dark(#1d1d1f, #f5f5f7);
+  }
+  #log { flex: 1; overflow-y: auto; padding: 16px; }
+  .msg { max-width: 85%; margin: 6px 0; padding: 9px 13px; border-radius: 14px;
+         white-space: pre-wrap; word-wrap: break-word; }
+  .user { background: #0a84ff; color: #fff; margin-left: auto; border-bottom-right-radius: 4px; }
+  .bot  { background: light-dark(#e9e9eb, #2c2c2e); border-bottom-left-radius: 4px; }
+  .tool { font-size: 11px; opacity: .55; margin: 2px 0 2px 6px; }
+  .err  { font-size: 12px; color: #ff453a; margin: 4px 6px; }
+  #bar { display: flex; gap: 8px; padding: 10px 12px;
+         border-top: 1px solid light-dark(#d2d2d7, #3a3a3c);
+         background: light-dark(#fff, #2c2c2e); }
+  #input { flex: 1; border: none; outline: none; resize: none; font: inherit;
+           background: transparent; color: inherit; max-height: 120px; }
+  #sendBtn { border: none; border-radius: 50%; width: 32px; height: 32px; align-self: flex-end;
+             background: #0a84ff; color: #fff; font-size: 16px; cursor: pointer; }
+  #sendBtn:disabled { opacity: .4; }
+  .typing { opacity: .5; font-size: 12px; padding: 4px 6px; }
+</style>
+</head>
+<body>
+  <div id="log"></div>
+  <div id="bar">
+    <textarea id="input" rows="1" placeholder="Message…" autofocus></textarea>
+    <button id="sendBtn" title="Send">↑</button>
+  </div>
+<script>
+  const log = document.getElementById('log');
+  const input = document.getElementById('input');
+  const btn = document.getElementById('sendBtn');
+  let botEl = null, busy = false;
+
+  function add(cls, text) {
+    const el = document.createElement('div');
+    el.className = cls; el.textContent = text;
+    log.appendChild(el); log.scrollTop = log.scrollHeight;
+    return el;
+  }
+  function setBusy(b) {
+    busy = b; btn.disabled = b;
+    document.querySelectorAll('.typing').forEach(e => e.remove());
+    if (b) add('typing', '…');
+  }
+
+  // called from Python
+  window.appendText = t => {
+    document.querySelectorAll('.typing').forEach(e => e.remove());
+    if (!botEl) botEl = add('msg bot', '');
+    botEl.textContent += (botEl.textContent ? '\n\n' : '') + t;
+    log.scrollTop = log.scrollHeight;
+  };
+  window.appendTool = name => { add('tool', '⚙ ' + name); };
+  window.done = err => { if (err) add('err', 'stopped: ' + err); botEl = null; setBusy(false); input.focus(); };
+
+  function send() {
+    const text = input.value.trim();
+    if (!text || busy) return;
+    add('msg user', text);
+    input.value = ''; input.style.height = 'auto';
+    setBusy(true);
+    pywebview.api.send(text);
+  }
+  btn.onclick = send;
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+  });
+  input.addEventListener('input', () => {
+    input.style.height = 'auto'; input.style.height = input.scrollHeight + 'px';
+  });
+  window.addEventListener('pywebviewready', () => { setBusy(true); pywebview.api.greet(); });
+</script>
+</body>
+</html>

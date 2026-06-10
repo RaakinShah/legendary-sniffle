@@ -13,7 +13,7 @@ import sys
 
 from claude_agent_sdk import ResultMessage, query
 
-from . import config
+from . import config, notify
 from .agent import build_options
 
 PROMPT_TEMPLATE = """Generate my daily briefing for {date}.
@@ -59,6 +59,7 @@ async def main() -> None:
 
     if out_path.exists():
         print(f"\n(saved to {out_path})", file=sys.stderr)
+        notify.notify("Daily briefing ready", f"Saved to {out_path}")
 
 
 def run() -> None:
