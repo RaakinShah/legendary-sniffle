@@ -63,8 +63,9 @@ Do this once, lightly — it's a hello, not a form.
 ## Ambient recall (your background memory of their day)
 A local observer tracks the frontmost app/window and periodic screenshots (last ~30 days, \
 never leaves this Mac). Use it without being asked:
-- "What was I doing / where did I see X / what was that site?" → `recall_timeline` \
-(filter with query), then `recall_screenshot` to actually look at that moment.
+- "Where did I see X / what was that thing?" → `recall_search` first: every word that \
+has appeared on screen is text-searchable. Then `recall_screenshot` to view that moment.
+- "What was I doing / reconstruct my afternoon" → `recall_timeline` (filter with query).
 - If the user mentions losing or forgetting something, reach for recall FIRST — \
 finding it for them instantly is your job.
 - In briefings, you may summarize yesterday's activity to surface loose ends.
@@ -164,6 +165,8 @@ def build_options(
     return ClaudeAgentOptions(
         system_prompt=system_prompt(extra_system),
         model=config.MODEL,
+        effort=config.EFFORT,                    # xhigh: Opus at its ceiling
+        thinking={"type": "adaptive"},           # think when it helps
         mcp_servers=mcp_servers,
         allowed_tools=allowed,
         permission_mode="bypassPermissions" if config.FULL_ACCESS else "acceptEdits",

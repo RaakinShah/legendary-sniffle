@@ -13,7 +13,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
-gui = ["pywebview>=5.0", "pynput>=1.7"]
+gui = [
+    "pywebview>=5.0",
+    "pynput>=1.7",
+    "pyobjc-framework-Vision>=10; sys_platform == 'darwin'",
+]
 
 [project.scripts]
 assistant = "assistant.cli:run"

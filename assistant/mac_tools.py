@@ -122,6 +122,25 @@ async def recall_timeline(args: dict[str, Any]) -> dict[str, Any]:
 
 
 @tool(
+    name="recall_search",
+    description=(
+        "Full-text search EVERYTHING that has appeared on the user's screen (OCR'd "
+        "ambient screenshots, last ~30 days). The fastest way to find something the "
+        "user saw but lost: an error message, a price, a name, a link, a document. "
+        "Returns timestamped snippets; follow up with recall_screenshot to view the moment."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {"query": {"type": "string", "description": "Words to find, e.g. 'flight confirmation'"}},
+        "required": ["query"],
+    },
+)
+async def recall_search(args: dict[str, Any]) -> dict[str, Any]:
+    from . import observer
+    return _text(observer.search_screen(str(args.get("query", ""))))
+
+
+@tool(
     name="recall_screenshot",
     description=(
         "Retrieve the ambient screenshot closest to a time, to see what was on the "
@@ -158,5 +177,5 @@ def _text(message: str, is_error: bool = False) -> dict[str, Any]:
 def build_server():
     return create_sdk_mcp_server(
         name="mac", version="1.0.0",
-        tools=[capture_screen, recall_timeline, recall_screenshot],
+        tools=[capture_screen, recall_timeline, recall_search, recall_screenshot],
     )

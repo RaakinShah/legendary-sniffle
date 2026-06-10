@@ -32,7 +32,35 @@ def _conn() -> sqlite3.Connection:
     con = sqlite3.connect(DB)
     con.execute("CREATE TABLE IF NOT EXISTS activity (ts TEXT, app TEXT, title TEXT)")
     con.execute("CREATE INDEX IF NOT EXISTS idx_ts ON activity(ts)")
+    con.execute(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS screen_fts "
+        "USING fts5(ts UNINDEXED, app UNINDEXED, title UNINDEXED, text)"
+    )
     return con
+
+
+def _ocr(path) -> str:
+    """Read all text from a screenshot with macOS's built-in Vision OCR."""
+    try:
+        import Foundation
+        import Vision
+        url = Foundation.NSURL.fileURLWithPath_(str(path))
+        handler = Vision.VNImageRequestHandler.alloc().initWithURL_options_(url, None)
+        req = Vision.VNRecognizeTextRequest.alloc().init()
+        req.setRecognitionLevel_(Vision.VNRequestTextRecognitionLevelFast)
+        ok = handler.performRequests_error_([req], None)
+        if isinstance(ok, tuple):  # pyobjc returns (bool, error)
+            ok = ok[0]
+        if not ok:
+            return ""
+        lines = []
+        for res in req.results() or []:
+            cands = res.topCandidates_(1)
+            if cands and len(cands):
+                lines.append(str(cands[0].string()))
+        return "\n".join(lines)
+    except Exception:
+        return ""
 
 
 def _osa(script: str) -> str:
@@ -53,17 +81,26 @@ def _frontmost() -> tuple[str, str]:
     return app, title
 
 
-def _snapshot(now: dt.datetime) -> None:
+def _snapshot(con: sqlite3.Connection, now: dt.datetime, app: str, title: str) -> None:
     SHOT_DIR.mkdir(parents=True, exist_ok=True)
     path = SHOT_DIR / f"{now.strftime('%Y%m%d-%H%M')}.jpg"
     subprocess.run(["screencapture", "-x", "-t", "jpg", str(path)], capture_output=True)
-    if path.exists():
-        subprocess.run(["sips", "--resampleWidth", "1024", str(path)], capture_output=True)
+    if not path.exists():
+        return
+    text = _ocr(path)  # OCR BEFORE downscaling for accuracy
+    subprocess.run(["sips", "--resampleWidth", "1024", str(path)], capture_output=True)
+    if text:
+        con.execute(
+            "INSERT INTO screen_fts VALUES (?,?,?,?)",
+            (now.isoformat(timespec="seconds"), app, title, text),
+        )
+        con.commit()
 
 
 def _prune(con: sqlite3.Connection, now: dt.datetime) -> None:
     cutoff = (now - dt.timedelta(hours=RETAIN_HOURS)).isoformat(timespec="seconds")
     con.execute("DELETE FROM activity WHERE ts < ?", (cutoff,))
+    con.execute("DELETE FROM screen_fts WHERE ts < ?", (cutoff,))
     con.commit()
     if SHOT_DIR.is_dir():
         stamp = (now - dt.timedelta(hours=RETAIN_HOURS)).strftime("%Y%m%d-%H%M")
@@ -87,7 +124,7 @@ def _loop() -> None:
                 con.commit()
             if time.time() - last_shot >= SHOT_EVERY:
                 last_shot = time.time()
-                _snapshot(now)
+                _snapshot(con, now, app, title)
                 _prune(con, now)
         except Exception:
             pass
@@ -132,6 +169,33 @@ def timeline(since_hours: float = 24, query: str = "") -> str:
             start_ts, prev = ts, key
         prev_ts = ts
     return "\n".join(out[-200:])
+
+
+def search_screen(query: str, limit: int = 20) -> str:
+    """Full-text search over everything OCR'd from the screen. Returns moments."""
+    if not DB.exists():
+        return "No screen memory recorded yet."
+    con = _conn()
+    try:
+        rows = con.execute(
+            "SELECT ts, app, title, snippet(screen_fts, 3, '>>', '<<', ' … ', 14) "
+            "FROM screen_fts WHERE screen_fts MATCH ? ORDER BY ts DESC LIMIT ?",
+            (query, limit),
+        ).fetchall()
+    except sqlite3.OperationalError:  # bad FTS syntax — fall back to a plain term
+        safe = '"' + query.replace('"', "") + '"'
+        rows = con.execute(
+            "SELECT ts, app, title, snippet(screen_fts, 3, '>>', '<<', ' … ', 14) "
+            "FROM screen_fts WHERE screen_fts MATCH ? ORDER BY ts DESC LIMIT ?",
+            (safe, limit),
+        ).fetchall()
+    finally:
+        con.close()
+    if not rows:
+        return f"Nothing matching {query!r} has appeared on screen (in the retained window)."
+    out = [f"{ts[:16].replace('T', ' ')}  [{app}{' — ' + title if title else ''}]  {snip}"
+           for ts, app, title, snip in rows]
+    return "\n".join(out)
 
 
 def nearest_shot(when: str = "") -> str | None:
