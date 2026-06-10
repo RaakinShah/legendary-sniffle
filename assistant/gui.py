@@ -156,7 +156,7 @@ class Bridge:
         else:
             self.visible = True
             self.window.show()
-            self.window.evaluate_js("focusInput && focusInput()")
+            self.window.evaluate_js("window.summon ? summon() : (window.focusInput && focusInput())")
 
     def greet(self) -> str:
         return self.send(

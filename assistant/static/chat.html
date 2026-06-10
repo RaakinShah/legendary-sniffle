@@ -76,8 +76,12 @@
     box-shadow: var(--inset-hi);
     border-color: var(--glass-border);
   }
+  .orbWrap { flex: none; animation: float 5.5s ease-in-out infinite; }
+  @keyframes float { 50% { transform: translateY(-2.5px); } }
+  .orbWrap.pop { animation: float 5.5s ease-in-out infinite, pop .55s var(--spring); }
+  @keyframes pop { 40% { transform: scale(1.4); } }
   .orb {
-    position: relative; width: 24px; height: 24px; border-radius: 50%; flex: none;
+    position: relative; width: 24px; height: 24px; border-radius: 50%;
     background:
       radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0) 40%),
       var(--orb);
@@ -96,7 +100,7 @@
     height: 100%; padding: 0 10px 0 18px; border-radius: 999px;
     animation: appear .45s var(--spring) both;
   }
-  @keyframes appear { from { opacity: 0; transform: scale(.92) translateY(-8px); } }
+  @keyframes appear { from { opacity: 0; transform: scale(.93) translateY(-12px); } }
   #pillInput {
     flex: 1; border: none; outline: none; background: transparent;
     font: 17px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
@@ -147,18 +151,28 @@
     -webkit-mask-image: linear-gradient(to bottom,
       transparent 0, #000 12px, #000 calc(100% - 10px), transparent 100%);
   }
+  /* nearly-empty conversations breathe in the middle instead of hugging the top */
+  #log.center { display: flex; flex-direction: column; justify-content: center; }
+  #log.center #chips { justify-content: center; }
+  #log.center .row.bot { justify-content: center; }
+  #panelView.closing { animation: shrink .16s ease-in both; }
+  @keyframes shrink { to { opacity: 0; transform: scale(.97) translateY(-4px); } }
+  .orb.pop { animation: orb 7s linear infinite, glow 4.5s ease-in-out infinite, pop .5s var(--spring); }
+  @keyframes pop { 40% { transform: scale(1.35); } }
   #log::-webkit-scrollbar { width: 7px; }
   #log::-webkit-scrollbar-thumb {
     background: var(--fill-hover); border-radius: 4px;
     border: 2px solid transparent; background-clip: padding-box;
   }
 
-  .row { display: flex; margin: 7px 0; animation: rise .42s var(--spring) both; }
+  .row { display: flex; margin: 7px 0; animation: rise .5s var(--spring) both; }
   .row.user { justify-content: flex-end; margin: 14px 0 10px; }
-  @keyframes rise { from { opacity: 0; transform: translateY(12px) scale(.97); } }
+  @keyframes rise { from { opacity: 0; transform: translateY(16px) scale(.96); } }
+  .bot .msg.reveal { animation: reveal .4s ease; }
+  @keyframes reveal { from { opacity: .35; transform: translateY(3px); } }
 
   .user .msg {
-    max-width: 78%; padding: 9px 15px; border-radius: 19px;
+    max-width: min(78%, 520px); padding: 9px 15px; border-radius: 19px;
     border-bottom-right-radius: 6px; font-size: 15px;
     background: var(--bubble);
     border: 1px solid var(--glass-border);
@@ -168,9 +182,10 @@
   }
   /* assistant: plain text on glass, like Siri */
   .bot .msg {
-    max-width: 95%; padding: 4px 2px; font-size: 15px; line-height: 1.6;
+    max-width: min(95%, 640px); padding: 4px 2px; font-size: 15px; line-height: 1.6;
     word-wrap: break-word; -webkit-user-select: text;
   }
+  ::selection { background: rgba(10, 132, 255, 0.30); }
   .bot .msg p { margin: .45em 0; }
   .bot .msg p:first-child { margin-top: 0; }
   .bot .msg p:last-child { margin-bottom: 0; }
@@ -233,8 +248,9 @@
     margin: 2px 8px 2px 0; padding: 3px 10px;
     font-size: 11px; font-weight: 500; color: var(--dim); opacity: .8;
     background: var(--code-bg); border-radius: 999px;
-    animation: rise .38s var(--spring) both;
+    animation: slideIn .42s var(--spring) both;
   }
+  @keyframes slideIn { from { opacity: 0; transform: translateX(-14px); } }
   .tool .pulse {
     width: 6px; height: 6px; border-radius: 50%;
     background: var(--accent); animation: pulse 1.2s ease-in-out infinite;
@@ -254,8 +270,10 @@
     width: fit-content; margin: 6px auto; padding: 4px 12px;
     font-size: 11.5px; color: #ff453a;
     background: rgba(255, 69, 58, .12); border: 1px solid rgba(255, 69, 58, .25);
-    border-radius: 999px; animation: rise .38s var(--spring) both;
+    border-radius: 999px;
+    animation: rise .38s var(--spring) both, shake .45s ease .4s;
   }
+  @keyframes shake { 20%, 60% { transform: translateX(-4px); } 40%, 80% { transform: translateX(4px); } }
 
   #bar { flex: none; display: flex; align-items: flex-end; gap: 9px; padding: 8px 15px 15px; }
   #screenBtn2 { background: var(--fill); color: var(--dim); width: 38px; height: 38px; }
@@ -285,6 +303,11 @@
     transition: transform .18s var(--spring), opacity .2s, box-shadow .2s;
   }
   #sendBtn:hover { transform: scale(1.08); box-shadow: 0 3px 10px rgba(0, 0, 0, 0.30), inset 0 1px 0 rgba(255, 255, 255, 0.25); }
+  #sendBtn.ready {
+    transform: scale(1.1);
+    box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.25), 0 3px 10px rgba(0, 0, 0, 0.30),
+                inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  }
   #sendBtn:active { transform: scale(.86); }
   #sendBtn:disabled { opacity: .3; transform: none; cursor: default; }
   #sendBtn svg { width: 13px; height: 13px; }
@@ -299,7 +322,7 @@
 <body>
   <!-- summon pill -->
   <div id="pillView" class="glass">
-    <div class="orb" title="Aide"></div>
+    <div class="orbWrap" title="Aide"><div class="orb"></div></div>
     <input id="pillInput" placeholder="Ask Aide" autofocus>
     <button class="iconBtn" id="screenBtn1" title="Ask about what's on your screen">
       <svg viewBox="0 0 16 16" fill="none"><rect x="1.5" y="2.5" width="13" height="9" rx="1.8"
@@ -316,7 +339,7 @@
           stroke-width="2" stroke-linecap="round"/></svg>
       </button>
       <div class="spacer"></div>
-      <div class="orb"></div>
+      <div class="orbWrap"><div class="orb"></div></div>
       <div class="spacer"></div>
       <button class="ctl" id="newBtn" title="New conversation">
         <svg viewBox="0 0 12 12" fill="none"><path d="M6 1.5v9M1.5 6h9" stroke="currentColor"
@@ -411,7 +434,18 @@
     armIdle();
   }
 
-  function scrollDown() { log.scrollTo({ top: log.scrollHeight, behavior: 'smooth' }); }
+  function updateCenter() {
+    const rows = log.querySelectorAll('.row:not(.typing-row)').length;
+    // measure children, not scrollHeight — flex centering inflates scrollHeight
+    const content = Array.from(log.children).reduce((a, c) => a + c.offsetHeight, 0);
+    log.classList.toggle('center',
+      !log.querySelector('.row.user') && rows <= 1
+      && content <= log.clientHeight * 0.6);
+  }
+  function scrollDown() {
+    updateCenter();
+    log.scrollTo({ top: log.scrollHeight, behavior: 'smooth' });
+  }
   function addRow(cls, inner) {
     const row = document.createElement('div');
     row.className = 'row ' + cls;
@@ -431,7 +465,7 @@
     const t = document.createElement('div');
     t.className = 'msg typing';
     t.innerHTML = '<span></span><span></span><span></span>';
-    addRow('bot', t).parentElement.classList.add('typing-row');
+    addRow('bot typing-row', t);
   }
   function setBusy(b) {
     busy = b; btn.disabled = b;
@@ -502,6 +536,7 @@
     botRaw += (botRaw ? '\n\n' : '') + t;
     el.innerHTML = md(botRaw);
     el._raw = botRaw;
+    el.classList.remove('reveal'); void el.offsetWidth; el.classList.add('reveal');
     scrollDown(); showTyping();
   };
   window.appendTool = name => {
@@ -524,10 +559,25 @@
     botEl = null; botRaw = '';
     busy = false; btn.disabled = false;
     document.body.classList.remove('busy');
+    document.querySelectorAll('.orbWrap').forEach(o => {
+      o.classList.remove('pop'); void o.offsetWidth; o.classList.add('pop');
+      setTimeout(() => o.classList.remove('pop'), 600);
+    });
     if (state === 'panel') input.focus();
+    updateCenter();
     armIdle();
   };
   window.focusInput = () => (state === 'pill' ? pillInput : input).focus();
+  window.summon = () => {   // re-play the entrance when ⌥Space brings the window back
+    const v = state === 'pill' ? document.getElementById('pillView') : document.getElementById('panelView');
+    v.style.animation = 'none'; void v.offsetWidth; v.style.animation = '';
+    focusInput();
+  };
+  function collapse() {
+    const pv = document.getElementById('panelView');
+    pv.classList.add('closing');
+    setTimeout(() => { pv.classList.remove('closing'); setState('pill'); }, 150);
+  }
 
   function submit(text) {
     if (!text || busy) return;
@@ -557,7 +607,7 @@
     { passive: true });
   document.getElementById('screenBtn1').onclick = askScreen;
   document.getElementById('screenBtn2').onclick = askScreen;
-  document.getElementById('closeBtn').onclick = () => setState('pill');
+  document.getElementById('closeBtn').onclick = collapse;
   document.getElementById('expandBtn').onclick = () => { expanded = !expanded; setState('panel'); };
   document.getElementById('newBtn').onclick = () => {
     if (busy) return;
@@ -574,10 +624,11 @@
   });
   input.addEventListener('input', () => {
     input.style.height = 'auto'; input.style.height = input.scrollHeight + 'px';
+    btn.classList.toggle('ready', !!input.value.trim() && !busy);
   });
   document.addEventListener('keydown', e => {
     if (e.key !== 'Escape') return;
-    if (state === 'panel') setState('pill');
+    if (state === 'panel') collapse();
     else try { pywebview.api.hide_window(); } catch (err) {}   // Esc in pill = dismiss; ⌥Space brings it back
   });
 
