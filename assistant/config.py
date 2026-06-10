@@ -32,6 +32,11 @@ def _load_dotenv() -> None:
 
 _load_dotenv()
 
+# If a subscription token is configured, it wins: the SDK would otherwise prefer
+# ANTHROPIC_API_KEY, which surprises users whose API account has no credits.
+if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
+    os.environ.pop("ANTHROPIC_API_KEY", None)
+
 
 def _expand(p: str) -> Path:
     return Path(os.path.expandvars(os.path.expanduser(p)))

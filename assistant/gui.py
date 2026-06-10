@@ -24,6 +24,12 @@ from .agent import build_options
 HTML_PATH = Path(__file__).parent / "static" / "chat.html"
 _lock_file = None  # held for process lifetime (single-instance guard)
 
+LOW_CREDIT_TIP = """💡 **Your API account is out of credits.** To run me on your \
+Claude Pro/Max subscription instead:
+1. In Terminal: `claude setup-token` (install Claude Code first: `curl -fsSL https://claude.ai/install.sh | bash`)
+2. In the project `.env`: add `CLAUDE_CODE_OAUTH_TOKEN=<that token>` and **delete the ANTHROPIC_API_KEY line**
+3. Quit and reopen me (⌥Space)"""
+
 
 class Bridge:
     """JS <-> agent bridge. JS calls send(); we push output back via evaluate_js."""
@@ -67,6 +73,8 @@ class Bridge:
                     for b in m.content:
                         if isinstance(b, TextBlock):
                             self._js("appendText", b.text)
+                            if "credit balance is too low" in b.text.lower():
+                                self._js("appendText", LOW_CREDIT_TIP)
                         elif isinstance(b, ToolUseBlock):
                             self._js("appendTool", b.name)
                 elif isinstance(m, ResultMessage):
