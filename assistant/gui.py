@@ -90,9 +90,32 @@ class Bridge:
         return "ok"
 
     def resize(self, width: int, height: int) -> str:
+        width, height = int(width), int(height)
+        win = getattr(self, "_ns_window", None)
+        if win is not None:
+            try:
+                import AppKit
+
+                def apply():
+                    try:
+                        f = win.frame()
+                        # AppKit origin is bottom-left; keep the TOP edge fixed
+                        nf = AppKit.NSMakeRect(
+                            f.origin.x, f.origin.y + f.size.height - height, width, height
+                        )
+                        radius = height / 2.0 if height <= 110 else 28.0
+                        win.contentView().layer().setCornerRadius_(radius)
+                        win.setFrame_display_animate_(nf, True, True)  # smooth native morph
+                        win.invalidateShadow()
+                    except Exception:
+                        pass
+                AppKit.NSOperationQueue.mainQueue().addOperationWithBlock_(apply)
+                return "ok"
+            except Exception:
+                pass
         if self.window:
-            self.window.resize(int(width), int(height))
-            self._update_radius(int(height))
+            self.window.resize(width, height)
+            self._update_radius(height)
         return "ok"
 
     def _update_radius(self, height: int) -> None:

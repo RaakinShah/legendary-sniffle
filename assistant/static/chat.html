@@ -119,7 +119,16 @@
   }
   #panelView.open { display: flex; animation: appear .4s var(--spring) both; }
 
-  #head { flex: none; display: flex; align-items: center; gap: 8px; padding: 13px 15px 6px; }
+  #head {
+    flex: none; display: flex; align-items: center; gap: 8px; padding: 13px 15px 8px;
+    transition: box-shadow .25s ease;
+  }
+  #head.scrolled { box-shadow: 0 1px 0 var(--glass-border); }
+  /* staggered entrance when the panel opens */
+  #panelView.open #head { animation: fadeDown .4s var(--spring) .04s both; }
+  #panelView.open #log  { animation: fadeDown .4s var(--spring) .09s both; }
+  #panelView.open #bar  { animation: fadeDown .4s var(--spring) .14s both; }
+  @keyframes fadeDown { from { opacity: 0; transform: translateY(-7px); } }
   #head .spacer { flex: 1; }
   #head .ctl {
     width: 30px; height: 30px; border: none; border-radius: 50%;
@@ -131,7 +140,11 @@
   #head .ctl:active { transform: scale(.85); }
   #head .ctl svg { width: 12px; height: 12px; }
 
-  #log { flex: 1; overflow-y: auto; padding: 6px 20px 10px; }
+  #log {
+    flex: 1; overflow-y: auto; padding: 6px 22px 14px;
+    -webkit-mask-image: linear-gradient(to bottom,
+      transparent 0, #000 14px, #000 calc(100% - 10px), transparent 100%);
+  }
   #log::-webkit-scrollbar { width: 7px; }
   #log::-webkit-scrollbar-thumb {
     background: var(--fill-hover); border-radius: 4px;
@@ -153,7 +166,7 @@
   }
   /* assistant: plain text on glass, like Siri */
   .bot .msg {
-    max-width: 95%; padding: 4px 2px; font-size: 15px;
+    max-width: 95%; padding: 4px 2px; font-size: 15px; line-height: 1.6;
     word-wrap: break-word; -webkit-user-select: text;
   }
   .bot .msg p { margin: .45em 0; }
@@ -270,6 +283,12 @@
   #sendBtn:active { transform: scale(.86); }
   #sendBtn:disabled { opacity: .3; transform: none; cursor: default; }
   #sendBtn svg { width: 13px; height: 13px; }
+  #sendBtn.fly svg { animation: fly .38s var(--spring); }
+  @keyframes fly {
+    35% { transform: translateY(-16px); opacity: 0; }
+    36% { transform: translateY(14px); opacity: 0; }
+    100% { transform: none; opacity: 1; }
+  }
 </style>
 </head>
 <body>
@@ -447,9 +466,10 @@
      ['Plan my day', 'Plan my day: check my tasks and calendar and lay out a plan.'],
      ['What’s due', 'What tasks are due or overdue?'],
      ['Check my email', 'Check my recent email and summarize anything that needs my attention.'],
-    ].forEach(([label, prompt]) => {
+    ].forEach(([label, prompt], i) => {
       const b = document.createElement('button');
       b.className = 'chip'; b.textContent = label;
+      b.style.animation = `rise .45s var(--spring) ${.1 + i * .06}s both`;
       b.onclick = () => prompt === '__SCREEN__' ? askScreen() : submit(prompt);
       wrap.appendChild(b);
     });
@@ -522,7 +542,14 @@
       'If it is obvious what I need, just do it; otherwise give a tight summary and offer next steps.');
   }
 
-  btn.onclick = () => { const t = input.value.trim(); input.value = ''; input.style.height = 'auto'; submit(t); };
+  btn.onclick = () => {
+    const t = input.value.trim();
+    if (t && !busy) { btn.classList.add('fly'); setTimeout(() => btn.classList.remove('fly'), 420); }
+    input.value = ''; input.style.height = 'auto'; submit(t);
+  };
+  log.addEventListener('scroll', () =>
+    document.getElementById('head').classList.toggle('scrolled', log.scrollTop > 8),
+    { passive: true });
   document.getElementById('screenBtn1').onclick = askScreen;
   document.getElementById('screenBtn2').onclick = askScreen;
   document.getElementById('closeBtn').onclick = () => setState('pill');
