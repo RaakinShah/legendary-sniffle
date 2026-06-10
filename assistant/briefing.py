@@ -37,8 +37,8 @@ final message."""
 
 
 async def main() -> None:
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        print("ANTHROPIC_API_KEY not set — see README.", file=sys.stderr)
+    if not config.auth_available():
+        print(config.AUTH_HELP, file=sys.stderr)
         raise SystemExit(1)
 
     today = dt.date.today().isoformat()

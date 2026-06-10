@@ -27,15 +27,9 @@ Data lives in {config.ASSISTANT_HOME}. Type your message, or /quit to exit.
 
 
 def _check_auth() -> bool:
-    if os.environ.get("ANTHROPIC_API_KEY"):
+    if config.auth_available():
         return True
-    print(
-        "No ANTHROPIC_API_KEY found.\n"
-        "  1. Get a key at https://console.anthropic.com (API Keys)\n"
-        "  2. Copy .env.example to .env and paste your key in\n"
-        "  3. Run `assistant` again",
-        file=sys.stderr,
-    )
+    print(config.AUTH_HELP, file=sys.stderr)
     return False
 
 

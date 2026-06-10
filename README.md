@@ -35,9 +35,16 @@ git clone <this repo> && cd legendary-sniffle
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
-cp .env.example .env
-# Get an API key at https://console.anthropic.com -> API Keys,
-# then paste it into .env as ANTHROPIC_API_KEY=sk-ant-...
+cp .env.example .env   # then pick ONE auth option:
+
+# A) Claude Pro/Max subscription (no API credits needed):
+#    curl -fsSL https://claude.ai/install.sh | bash   # install Claude Code
+#    claude setup-token                               # log in via browser
+#    -> paste the token into .env as CLAUDE_CODE_OAUTH_TOKEN=...
+#    (a plain `claude` login on the same machine also works, with no .env entry)
+
+# B) API key: https://console.anthropic.com -> API Keys
+#    -> paste into .env as ANTHROPIC_API_KEY=sk-ant-...
 
 assistant          # start chatting
 ```

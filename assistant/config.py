@@ -47,6 +47,31 @@ ASSISTANT_NAME = os.environ.get("ASSISTANT_NAME", "Aide")
 MODEL = os.environ.get("ASSISTANT_MODEL", "claude-opus-4-8")
 
 
+AUTH_HELP = """No Claude credentials found. Two options:
+
+  A) Use your Claude Pro/Max subscription (no API credits needed):
+     1. Install Claude Code:  curl -fsSL https://claude.ai/install.sh | bash
+     2. Run:  claude setup-token   (logs in via browser)
+     3. Put the printed token in .env as CLAUDE_CODE_OAUTH_TOKEN=...
+        (or just run `claude` once and log in — a stored login also works)
+
+  B) Use an API key from https://console.anthropic.com:
+     Copy .env.example to .env and set ANTHROPIC_API_KEY=...
+"""
+
+
+def auth_available() -> bool:
+    """True if any usable Claude credential is present: API key, subscription
+    OAuth token, or a stored Claude Code login on this machine."""
+    if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
+        return True
+    home = Path.home()
+    if (home / ".claude" / ".credentials.json").is_file():
+        return True
+    cfg = home / ".claude.json"
+    return cfg.is_file() and "oauthAccount" in cfg.read_text()
+
+
 def allowed_dirs() -> list[str]:
     """Extra directories the assistant may access (ASSISTANT_ALLOWED_DIRS, colon-separated)."""
     raw = os.environ.get("ASSISTANT_ALLOWED_DIRS", "")

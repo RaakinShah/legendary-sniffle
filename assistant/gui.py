@@ -72,9 +72,8 @@ class Bridge:
 
 
 def run() -> None:
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        print("ANTHROPIC_API_KEY not set — copy .env.example to .env first (see README).",
-              file=sys.stderr)
+    if not config.auth_available():
+        print(config.AUTH_HELP, file=sys.stderr)
         raise SystemExit(1)
     try:
         import webview

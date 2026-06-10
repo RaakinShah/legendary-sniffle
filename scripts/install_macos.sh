@@ -21,6 +21,7 @@ cat > "$AGENTS/$1.plist" <<EOF
   <key>ProgramArguments</key><array><string>$2</string></array>
   <key>EnvironmentVariables</key><dict>
     <key>ANTHROPIC_API_KEY</key><string>${ANTHROPIC_API_KEY:-}</string>
+    <key>CLAUDE_CODE_OAUTH_TOKEN</key><string>${CLAUDE_CODE_OAUTH_TOKEN:-}</string>
   </dict>
   <key>StandardOutPath</key><string>$LOG/$1.log</string>
   <key>StandardErrorPath</key><string>$LOG/$1.log</string>
