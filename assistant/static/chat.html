@@ -8,7 +8,6 @@
   :root {
     color-scheme: light dark;
     --glass: rgba(244, 244, 248, 0.97);
-    --glass-tint: rgba(248, 248, 252, 0.42);
     --side: rgba(238, 238, 243, 0.78);
     --glass-border: rgba(0, 0, 0, 0.06);
     --hairline: rgba(0, 0, 0, 0.08);
@@ -33,7 +32,6 @@
   @media (prefers-color-scheme: dark) {
     :root {
       --glass: rgba(28, 28, 31, 0.95);
-      --glass-tint: rgba(18, 18, 22, 0.40);
       --side: rgba(22, 22, 25, 0.66);
       --glass-border: rgba(255, 255, 255, 0.13);
       --hairline: rgba(255, 255, 255, 0.10);
@@ -67,9 +65,6 @@
     backdrop-filter: blur(50px) saturate(1.6); -webkit-backdrop-filter: blur(50px) saturate(1.6);
     box-shadow: var(--shadow), var(--inset-hi);
   }
-  body.native { padding: 0; }
-  body.native .glass { background: var(--sheen), var(--glass-tint); box-shadow: var(--inset-hi); }
-
   .orb {
     position: relative; width: 24px; height: 24px; border-radius: 50%; flex: none;
     background: radial-gradient(circle at 32% 28%, rgba(255,255,255,.95), rgba(255,255,255,0) 40%), var(--orb);
@@ -310,8 +305,8 @@
           <svg viewBox="0 0 14 14" fill="none"><path d="M1.5 7s2-3.5 5.5-3.5S12.5 7 12.5 7s-2 3.5-5.5 3.5S1.5 7 1.5 7Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="7" cy="7" r="1.6" stroke="currentColor" stroke-width="1.4"/><path class="slash" d="M2.5 12L11.5 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" style="display:none"/></svg></button>
         <button class="ctl" id="newBtn" title="New conversation">
           <svg viewBox="0 0 12 12" fill="none"><path d="M6 1.5v9M1.5 6h9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
-        <button class="ctl" id="expandBtn" title="Expand">
-          <svg viewBox="0 0 12 12" fill="none"><path d="M7 1h4v4M5 11H1V7M11 1L7.5 4.5M1 11l3.5-3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+        <button class="ctl" id="expandBtn" title="Open sidebar">
+          <svg viewBox="0 0 13 13" fill="none"><rect x="1" y="1.5" width="11" height="10" rx="2.2" stroke="currentColor" stroke-width="1.5"/><path d="M4.8 1.5v10" stroke="currentColor" stroke-width="1.5"/></svg></button>
       </div>
       <div id="log"></div>
       <div id="bar">
@@ -327,9 +322,8 @@
 
 <script>
   const SIZES = { pill: [660, 96], panel: [660, 580], app: [1000, 700] };
-  const SIZES_NATIVE = { pill: [620, 64], panel: [660, 560], app: [1000, 680] };
   const IDLE_COLLAPSE_MS = 75000;
-  let state = 'pill', nativeMode = false, idleTimer = null;
+  let state = 'pill', idleTimer = null;
   let botEl = null, botRaw = '', busy = false, draftEl = null, draftText = '';
 
   const $ = id => document.getElementById(id);
@@ -364,18 +358,17 @@
 
   function setState(s) {
     state = s;
-    const sizes = nativeMode ? SIZES_NATIVE : SIZES;
-    const [w, h] = sizes[s] || sizes.panel;
+    const [w, h] = SIZES[s] || SIZES.panel;
     try { pywebview.api.resize(w, h); } catch (e) {}
     $('pillView').style.display = s === 'pill' ? 'flex' : 'none';
     appView.classList.toggle('open', s !== 'pill');
     appView.classList.toggle('app', s === 'app');
+    $('expandBtn').title = s === 'app' ? 'Compact view' : 'Open sidebar';
     if (s === 'app') refreshLists();
     updateCenter();
     (s === 'pill' ? pillInput : input).focus();
     armIdle();
   }
-  window.nativeGlass = on => { nativeMode = !!on; document.body.classList.toggle('native', nativeMode); setState(state); };
 
   function scrollDown() { updateCenter(); log.scrollTo({ top: log.scrollHeight, behavior: 'smooth' }); }
   function updateCenter() {

@@ -8,25 +8,15 @@ import sys
 import threading
 from pathlib import Path
 
-from claude_agent_sdk import (
-    AssistantMessage,
-    ClaudeSDKClient,
-    ResultMessage,
-    StreamEvent,
-    TextBlock,
-    ToolUseBlock,
-)
+from typing import TYPE_CHECKING
 
 from . import config, history, observer
-from .agent import build_options
+
+if TYPE_CHECKING:
+    from claude_agent_sdk import ClaudeSDKClient
 
 HTML_PATH = Path(__file__).parent / "static" / "chat.html"
 _lock_file = None  # held for process lifetime (single-instance guard)
-
-
-def _radius(height: int) -> float:
-    """Capsule for the pill, rounded panel otherwise."""
-    return height / 2.0 if height <= 110 else 28.0
 
 
 LOW_CREDIT_TIP = """💡 **Your API account is out of credits.** To run me on your \
@@ -42,19 +32,27 @@ class Bridge:
     def __init__(self) -> None:
         self.window = None
         self.visible = True
-        self.client: ClaudeSDKClient | None = None
+        self.client: "ClaudeSDKClient | None" = None
         self.conv_id: int | None = None
         self.session_id: str | None = None
         self._buf = ""  # accumulates the current assistant reply for persistence
         self.loop = asyncio.new_event_loop()
         threading.Thread(target=self.loop.run_forever, daemon=True).start()
 
+    def prewarm(self) -> None:
+        """Start the agent connection in the background so the first reply is instant."""
+        asyncio.run_coroutine_threadsafe(self._client_ready(), self.loop)
+
     def _js(self, fn: str, payload: str) -> None:
         if self.window:
             self.window.evaluate_js(f"{fn}({json.dumps(payload)})")
 
-    async def _client_ready(self) -> ClaudeSDKClient:
+    async def _client_ready(self) -> "ClaudeSDKClient":
         if self.client is None:
+            # Imported here, not at module top: the SDK (+ mcp) costs ~0.5s,
+            # which would otherwise delay the window appearing at launch.
+            from claude_agent_sdk import ClaudeSDKClient
+            from .agent import build_options
             self.client = ClaudeSDKClient(
                 options=build_options(partial_messages=True, resume=self.session_id)
             )
@@ -79,6 +77,9 @@ class Bridge:
         return f"{text}\n\n[Ambient context, auto-attached — not typed by the user: {ctx}]"
 
     async def _run(self, text: str, persist: bool = True) -> None:
+        from claude_agent_sdk import (
+            AssistantMessage, ResultMessage, StreamEvent, TextBlock, ToolUseBlock,
+        )
         self._buf = ""
         try:
             client = await self._client_ready()
@@ -183,12 +184,7 @@ class Bridge:
                         nf = AppKit.NSMakeRect(
                             f.origin.x, f.origin.y + f.size.height - height, width, height
                         )
-                        win.contentView().layer().setCornerRadius_(_radius(height))
-                        eff = getattr(self, "_ns_effect", None)
-                        if eff is not None:
-                            eff.layer().setCornerRadius_(_radius(height))
                         win.setFrame_display_animate_(nf, True, True)  # smooth native morph
-                        win.invalidateShadow()
                     except Exception:
                         pass
                 AppKit.NSOperationQueue.mainQueue().addOperationWithBlock_(apply)
@@ -274,40 +270,18 @@ def run() -> None:
     webview.start(_install_hotkey, bridge)
 
 
-def _native_glass(bridge: Bridge) -> None:
-    """Real macOS material: NSVisualEffectView blur clipped to a rounded mask,
-    with the native window shadow. Falls back silently to the CSS look."""
+def _find_ns_window(bridge: Bridge) -> None:
+    """Grab the NSWindow so resize() can animate frame changes. No layer tricks —
+    the page is transparent and CSS draws the entire glass (shape, blur, shadow)."""
     try:
         import AppKit
 
         def apply():
             try:
-                win = AppKit.NSApp().windows()[0]
                 for w in AppKit.NSApp().windows():
                     if w.title() == config.ASSISTANT_NAME:
-                        win = w
+                        bridge._ns_window = w
                         break
-                content = win.contentView()
-                content.setWantsLayer_(True)
-                layer = content.layer()
-                layer.setCornerRadius_(win.frame().size.height / 2.0)  # starts as pill
-                layer.setMasksToBounds_(True)
-                material = getattr(AppKit, "NSVisualEffectMaterialUnderWindowBackground",
-                                   getattr(AppKit, "NSVisualEffectMaterialHUDWindow", 13))
-                effect = AppKit.NSVisualEffectView.alloc().initWithFrame_(content.bounds())
-                effect.setMaterial_(material)
-                effect.setBlendingMode_(AppKit.NSVisualEffectBlendingModeBehindWindow)
-                effect.setState_(AppKit.NSVisualEffectStateActive)
-                effect.setAutoresizingMask_(AppKit.NSViewWidthSizable | AppKit.NSViewHeightSizable)
-                effect.setWantsLayer_(True)
-                effect.layer().setCornerRadius_(win.frame().size.height / 2.0)
-                effect.layer().setMasksToBounds_(True)
-                content.addSubview_positioned_relativeTo_(effect, AppKit.NSWindowBelow, None)
-                win.setHasShadow_(True)
-                win.invalidateShadow()
-                bridge._ns_window = win
-                bridge._ns_effect = effect
-                bridge.window.evaluate_js("window.nativeGlass && nativeGlass(true)")
             except Exception:
                 pass
         AppKit.NSOperationQueue.mainQueue().addOperationWithBlock_(apply)
@@ -316,13 +290,14 @@ def _native_glass(bridge: Bridge) -> None:
 
 
 def _install_hotkey(bridge: Bridge) -> None:
-    """Post-start setup: native glass, capture hooks, global ⌥Space summon/dismiss."""
+    """Post-start setup: capture hooks, recall, client pre-warm, ⌥Space summon."""
+    bridge.prewarm()   # connect the agent while the page is still loading
     if sys.platform == "darwin":
         from . import mac_tools
         mac_tools.before_capture = bridge.window.hide
         mac_tools.after_capture = bridge.window.show
         observer.start()   # ambient recall (ASSISTANT_RECALL=0 to disable)
-        _native_glass(bridge)
+        _find_ns_window(bridge)
     try:
         from pynput import keyboard
     except ImportError:
