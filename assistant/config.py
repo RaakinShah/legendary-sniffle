@@ -50,8 +50,9 @@ DB_PATH = ASSISTANT_HOME / "assistant.db"
 
 ASSISTANT_NAME = os.environ.get("ASSISTANT_NAME", "Aide")
 MODEL = os.environ.get("ASSISTANT_MODEL", "claude-opus-4-8")
-# Run Opus at its intelligence ceiling: xhigh effort + adaptive thinking.
-EFFORT = os.environ.get("ASSISTANT_EFFORT", "xhigh")
+# "high" is the quality/token-efficiency sweet spot; adaptive thinking spends
+# reasoning tokens only when a task needs them. Crank to "xhigh" for hard work.
+EFFORT = os.environ.get("ASSISTANT_EFFORT", "high")
 
 # Full system access: the assistant can read/act anywhere in your home directory
 # without per-action approval. Set ASSISTANT_FULL_ACCESS=0 to sandbox it back to

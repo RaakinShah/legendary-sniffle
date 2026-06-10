@@ -58,10 +58,24 @@ class Bridge:
                 pass
             self.client = None
 
+    @staticmethod
+    def _with_context(text: str) -> str:
+        """Littlebird-style: every message carries what the user is doing right now."""
+        if sys.platform != "darwin" or not config.RECALL:
+            return text
+        try:
+            from . import observer
+            ctx = observer.current_context()
+        except Exception:
+            ctx = ""
+        if not ctx:
+            return text
+        return f"{text}\n\n[Ambient context, auto-attached — not typed by the user: {ctx}]"
+
     async def _run(self, text: str) -> None:
         try:
             client = await self._client_ready()
-            await client.query(text)
+            await client.query(self._with_context(text))
             async for m in client.receive_response():
                 if isinstance(m, StreamEvent):
                     ev = m.event or {}
@@ -164,7 +178,9 @@ class Bridge:
     def greet(self) -> str:
         return self.send(
             "Session started. Greet me briefly; if anything is overdue or due today, "
-            "surface it in one or two lines. Then wait for my input."
+            "surface it in one or two lines. If the ambient context shows I'm in the "
+            "middle of something, acknowledge it naturally and offer to help with it. "
+            "Then wait for my input."
         )
 
 

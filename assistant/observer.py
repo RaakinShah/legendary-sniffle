@@ -171,6 +171,35 @@ def timeline(since_hours: float = 24, query: str = "") -> str:
     return "\n".join(out[-200:])
 
 
+def current_context() -> str:
+    """One-line ambient context: what the user is doing right now and lately.
+    Injected alongside chat messages so the assistant already knows the situation."""
+    if sys.platform != "darwin":
+        return ""
+    app, title = _frontmost()
+    now_part = f"{app}{' — ' + title if title else ''}" if app else ""
+    recent = []
+    if DB.exists():
+        cutoff = (dt.datetime.now() - dt.timedelta(minutes=45)).isoformat(timespec="seconds")
+        con = sqlite3.connect(DB)
+        rows = con.execute(
+            "SELECT DISTINCT app, title FROM activity WHERE ts >= ? ORDER BY ts DESC LIMIT 12",
+            (cutoff,),
+        ).fetchall()
+        con.close()
+        seen = {(app, title)}
+        for a, t in rows:
+            if (a, t) not in seen and len(recent) < 4:
+                seen.add((a, t))
+                recent.append(f"{a}{' — ' + t if t else ''}")
+    parts = []
+    if now_part:
+        parts.append(f"Right now: {now_part}.")
+    if recent:
+        parts.append("Recently: " + "; ".join(recent) + ".")
+    return " ".join(parts)
+
+
 def search_screen(query: str, limit: int = 20) -> str:
     """Full-text search over everything OCR'd from the screen. Returns moments."""
     if not DB.exists():
