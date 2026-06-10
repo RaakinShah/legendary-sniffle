@@ -162,12 +162,26 @@
   #sendBtn:active { transform: scale(.88); }
   #sendBtn:disabled { opacity: .35; transform: none; box-shadow: none; cursor: default; }
   #sendBtn svg { width: 14px; height: 14px; }
+  #screenBtn {
+    flex: none; width: 30px; height: 30px; border: none; border-radius: 50%;
+    background: transparent; color: var(--text-dim); cursor: pointer;
+    display: grid; place-items: center; align-self: flex-end; margin-left: -6px;
+    transition: transform .18s var(--spring), color .2s ease, background .2s ease;
+  }
+  #screenBtn:hover { color: var(--accent); background: rgba(10,132,255,.10); transform: scale(1.08); }
+  #screenBtn:active { transform: scale(.86); }
+  #screenBtn svg { width: 16px; height: 16px; }
 </style>
 </head>
 <body>
   <div id="log"></div>
   <div id="bar">
     <div id="pill">
+      <button id="screenBtn" title="Ask about what's on your screen">
+        <svg viewBox="0 0 16 16" fill="none"><rect x="1.5" y="2.5" width="13" height="9" rx="1.8"
+          stroke="currentColor" stroke-width="1.6"/><path d="M5.5 14h5" stroke="currentColor"
+          stroke-width="1.6" stroke-linecap="round"/></svg>
+      </button>
       <textarea id="input" rows="1" placeholder="Message…" autofocus></textarea>
       <button id="sendBtn" title="Send">
         <svg viewBox="0 0 16 16" fill="none"><path d="M8 13V3M8 3L3.5 7.5M8 3l4.5 4.5"
@@ -269,6 +283,13 @@
     pywebview.api.send(text);
   }
   btn.onclick = send;
+  document.getElementById('screenBtn').onclick = () => {
+    if (busy) return;
+    bubble('user', '👁 What’s on my screen?');
+    setBusy(true);
+    pywebview.api.send('Capture my screen and help me with what I am currently looking at. ' +
+      'If it is obvious what I need, just do it; otherwise give a tight summary and offer next steps.');
+  };
   input.addEventListener('keydown', e => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   });
