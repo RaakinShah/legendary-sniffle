@@ -6,6 +6,7 @@ Requires Screen Recording permission (System Settings > Privacy & Security).
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import subprocess
 import tempfile
@@ -15,6 +16,10 @@ from typing import Any
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
 MAX_WIDTH = 1440  # downscale captures so they stay cheap in context
+
+# Hooks the GUI installs so captures see past Aide's own window.
+before_capture = None  # callable: hide the window
+after_capture = None   # callable: show it again
 
 
 @tool(
@@ -37,6 +42,26 @@ MAX_WIDTH = 1440  # downscale captures so they stay cheap in context
 )
 async def capture_screen(args: dict[str, Any]) -> dict[str, Any]:
     display = int(args.get("display", 1))
+    if before_capture:
+        try:
+            before_capture()
+            await asyncio.sleep(0.35)  # let the window actually disappear
+        except Exception:
+            pass
+    try:
+        return await _capture(display)
+    except Exception as exc:
+        return {"content": [{"type": "text", "text": f"Screen capture failed: {exc}"}],
+                "is_error": True}
+    finally:
+        if after_capture:
+            try:
+                after_capture()
+            except Exception:
+                pass
+
+
+async def _capture(display: int) -> dict[str, Any]:
     with tempfile.TemporaryDirectory() as td:
         shot = Path(td) / "screen.png"
         # -x: no sound, -D: display number

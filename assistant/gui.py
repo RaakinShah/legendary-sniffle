@@ -161,16 +161,15 @@ def run() -> None:
         x=x,
         y=y,
         frameless=True,
-        easy_drag=False,           # drag via .pywebview-drag-region elements
+        easy_drag=True,            # drag anywhere; controls stop propagation in JS
+        on_top=True,               # floats above other windows, like Siri
+        transparent=True,          # window itself is invisible; CSS draws the glass
         min_size=(380, 60),
     )
-    if sys.platform == "darwin":
-        # Native NSVisualEffectView blur behind a transparent page background.
-        kwargs.update(vibrancy=True, transparent=True)
     try:
         bridge.window = webview.create_window(config.ASSISTANT_NAME, **kwargs)
     except TypeError:  # older pywebview without some kwargs
-        for k in ("vibrancy", "transparent", "frameless", "easy_drag", "x", "y"):
+        for k in ("transparent", "frameless", "easy_drag", "on_top", "x", "y"):
             kwargs.pop(k, None)
         bridge.window = webview.create_window(config.ASSISTANT_NAME, **kwargs)
     bridge.visible = True
@@ -178,7 +177,11 @@ def run() -> None:
 
 
 def _install_hotkey(bridge: Bridge) -> None:
-    """Global ⌥Space summon/dismiss. Needs Accessibility permission on macOS."""
+    """Post-start setup: capture hooks + global ⌥Space summon/dismiss."""
+    if sys.platform == "darwin":
+        from . import mac_tools
+        mac_tools.before_capture = bridge.window.hide
+        mac_tools.after_capture = bridge.window.show
     try:
         from pynput import keyboard
     except ImportError:

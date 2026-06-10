@@ -3,49 +3,72 @@
 <head>
 <meta charset="utf-8">
 <style>
-  /* Siri AI on macOS: floating dark glass — pill summon state + conversation panel */
+  /* Siri AI on macOS: floating glass — pill summon state + conversation panel.
+     The window itself is fully transparent; everything visible is drawn here. */
   :root {
-    --glass: rgba(24, 24, 27, 0.78);
-    --glass-border: rgba(255, 255, 255, 0.14);
-    --text: #f5f5f7;
-    --dim: rgba(235, 235, 245, 0.55);
-    --fill: rgba(255, 255, 255, 0.10);
-    --fill-hover: rgba(255, 255, 255, 0.18);
+    color-scheme: light dark;
+    --glass: rgba(242, 242, 247, 0.97);
+    --glass-border: rgba(0, 0, 0, 0.10);
+    --glass-glow: rgba(255, 255, 255, 0.65);
+    --shadow: 0 22px 70px rgba(0, 0, 0, 0.28), 0 2px 10px rgba(0, 0, 0, 0.12);
+    --text: #1d1d1f;
+    --dim: rgba(60, 60, 67, 0.58);
+    --fill: rgba(0, 0, 0, 0.06);
+    --fill-hover: rgba(0, 0, 0, 0.11);
+    --code-bg: rgba(0, 0, 0, 0.05);
+    --btn-bg: #1d1d1f;
+    --btn-fg: #ffffff;
+    --link: #0a6dd6;
     --accent: #0a84ff;
     --orb: conic-gradient(from 200deg, #ff5fa2, #ffb45f, #5fd4ff, #a05fff, #ff5fa2);
     --spring: cubic-bezier(.34, 1.35, .42, 1);
   }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --glass: rgba(28, 28, 30, 0.96);
+      --glass-border: rgba(255, 255, 255, 0.13);
+      --glass-glow: rgba(255, 255, 255, 0.10);
+      --shadow: 0 26px 80px rgba(0, 0, 0, 0.55), 0 2px 12px rgba(0, 0, 0, 0.35);
+      --text: #f5f5f7;
+      --dim: rgba(235, 235, 245, 0.55);
+      --fill: rgba(255, 255, 255, 0.11);
+      --fill-hover: rgba(255, 255, 255, 0.18);
+      --code-bg: rgba(255, 255, 255, 0.08);
+      --btn-bg: #ffffff;
+      --btn-fg: #111111;
+      --link: #6cb2ff;
+    }
+  }
   * { box-sizing: border-box; -webkit-user-select: none; }
-  html, body { height: 100%; }
+  html, body { height: 100%; background: transparent; }
   body {
-    margin: 0; padding: 12px; overflow: hidden; background: transparent;
+    margin: 0; padding: 16px; overflow: hidden;
     font: 14.5px/1.55 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
     letter-spacing: .01em; color: var(--text);
   }
   .glass {
     background: var(--glass);
     border: 1px solid var(--glass-border);
-    backdrop-filter: blur(44px) saturate(1.7);
-    -webkit-backdrop-filter: blur(44px) saturate(1.7);
-    box-shadow: 0 18px 60px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.07);
+    backdrop-filter: blur(50px) saturate(1.6);
+    -webkit-backdrop-filter: blur(50px) saturate(1.6);
+    box-shadow: var(--shadow), inset 0 1px 0 var(--glass-glow);
   }
   .orb {
     width: 22px; height: 22px; border-radius: 50%; flex: none;
     background: var(--orb); filter: blur(.4px) saturate(1.3);
-    box-shadow: 0 0 10px rgba(120,160,255,.45);
+    box-shadow: 0 0 12px rgba(120, 160, 255, .55);
     animation: orb 7s linear infinite;
   }
   @keyframes orb { to { transform: rotate(360deg); } }
-  .busy .orb { animation-duration: 1.6s; box-shadow: 0 0 16px rgba(120,160,255,.8); }
+  .busy .orb { animation-duration: 1.4s; box-shadow: 0 0 18px rgba(120, 160, 255, .9); }
 
   /* ============ PILL (summon state) ============ */
   #pillView {
-    display: flex; align-items: center; gap: 11px;
-    height: 100%; padding: 0 10px 0 16px; border-radius: 34px;
+    display: flex; align-items: center; gap: 12px;
+    height: 100%; padding: 0 10px 0 18px; border-radius: 999px;
     animation: appear .45s var(--spring) both;
   }
   @keyframes appear { from { opacity: 0; transform: scale(.92) translateY(-8px); } }
-  #pillView .orb { cursor: grab; }
   #pillInput {
     flex: 1; border: none; outline: none; background: transparent;
     font: 17px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
@@ -54,14 +77,14 @@
   #pillInput::placeholder { color: var(--dim); }
 
   .iconBtn {
-    flex: none; width: 34px; height: 34px; border: none; border-radius: 50%;
+    flex: none; width: 36px; height: 36px; border: none; border-radius: 50%;
     background: transparent; color: var(--dim); cursor: pointer;
     display: grid; place-items: center;
     transition: transform .18s var(--spring), color .2s, background .2s;
   }
   .iconBtn:hover { color: var(--text); background: var(--fill); transform: scale(1.08); }
   .iconBtn:active { transform: scale(.85); }
-  .iconBtn svg { width: 16px; height: 16px; }
+  .iconBtn svg { width: 17px; height: 17px; }
 
   /* ============ PANEL (conversation state) ============ */
   #panelView {
@@ -70,10 +93,7 @@
   }
   #panelView.open { display: flex; animation: appear .4s var(--spring) both; }
 
-  #head {
-    flex: none; display: flex; align-items: center; gap: 8px;
-    padding: 12px 14px 6px;
-  }
+  #head { flex: none; display: flex; align-items: center; gap: 8px; padding: 13px 15px 6px; }
   #head .spacer { flex: 1; }
   #head .ctl {
     width: 30px; height: 30px; border: none; border-radius: 50%;
@@ -88,7 +108,7 @@
   #log { flex: 1; overflow-y: auto; padding: 6px 20px 10px; }
   #log::-webkit-scrollbar { width: 7px; }
   #log::-webkit-scrollbar-thumb {
-    background: rgba(255,255,255,.22); border-radius: 4px;
+    background: var(--fill-hover); border-radius: 4px;
     border: 2px solid transparent; background-clip: padding-box;
   }
 
@@ -113,17 +133,47 @@
   .bot .msg h1, .bot .msg h2, .bot .msg h3 { margin: .65em 0 .25em; font-size: 1.03em; font-weight: 650; }
   .bot .msg ul, .bot .msg ol { margin: .3em 0; padding-left: 1.3em; }
   .bot .msg li { margin: .14em 0; }
-  .bot .msg a { color: #6cb2ff; text-decoration: none; }
+  .bot .msg a { color: var(--link); text-decoration: none; }
   .bot .msg a:hover { text-decoration: underline; }
   .bot .msg code {
     font: 12.5px ui-monospace, "SF Mono", Menlo, monospace;
-    background: var(--fill); padding: 1.5px 5px; border-radius: 5px;
+    background: var(--code-bg); padding: 1.5px 5px; border-radius: 5px;
   }
   .bot .msg pre {
-    background: rgba(0,0,0,.35); border: 1px solid var(--glass-border);
+    background: var(--code-bg); border: 1px solid var(--glass-border);
     border-radius: 12px; padding: 10px 12px; overflow-x: auto; margin: .5em 0;
   }
   .bot .msg pre code { background: none; padding: 0; }
+
+  .draft { opacity: .92; }
+  .draft::after {
+    content: ''; display: inline-block; width: 7px; height: 14px; margin-left: 2px;
+    vertical-align: -2px; border-radius: 2px; background: var(--dim);
+    animation: caret 1s steps(2) infinite;
+  }
+  @keyframes caret { 50% { opacity: 0; } }
+
+  #chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 6px 0 10px; animation: rise .5s var(--spring) both; }
+  .chip {
+    border: none; cursor: pointer; padding: 8px 15px; border-radius: 999px;
+    font: 13px -apple-system, BlinkMacSystemFont, sans-serif; font-weight: 500;
+    color: var(--text); background: var(--fill);
+    transition: transform .18s var(--spring), background .2s;
+  }
+  .chip:hover { background: var(--fill-hover); transform: scale(1.05); }
+  .chip:active { transform: scale(.93); }
+
+  .row.bot { position: relative; }
+  .copyBtn {
+    position: absolute; top: 2px; right: 0; width: 26px; height: 26px;
+    border: none; border-radius: 8px; cursor: pointer;
+    background: var(--fill); color: var(--dim);
+    display: grid; place-items: center; opacity: 0;
+    transition: opacity .2s, background .2s, color .2s;
+  }
+  .row.bot:hover .copyBtn { opacity: 1; }
+  .copyBtn:hover { background: var(--fill-hover); color: var(--text); }
+  .copyBtn svg { width: 12px; height: 12px; }
 
   .tool {
     display: inline-flex; align-items: center; gap: 6px;
@@ -147,44 +197,14 @@
   .typing span:nth-child(3) { animation-delay: .36s; }
   @keyframes blink { 0%,70%,100% { opacity: .25; transform: translateY(0); } 35% { opacity: 1; transform: translateY(-3.5px); } }
 
-  .draft { opacity: .92; }
-  .draft::after {
-    content: ''; display: inline-block; width: 7px; height: 14px; margin-left: 2px;
-    vertical-align: -2px; border-radius: 2px; background: var(--dim);
-    animation: caret 1s steps(2) infinite;
-  }
-  @keyframes caret { 50% { opacity: 0; } }
-
-  #chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 6px 0 10px; animation: rise .5s var(--spring) both; }
-  .chip {
-    border: none; cursor: pointer; padding: 7px 14px; border-radius: 999px;
-    font: 13px -apple-system, BlinkMacSystemFont, sans-serif; color: var(--text);
-    background: var(--fill);
-    transition: transform .18s var(--spring), background .2s;
-  }
-  .chip:hover { background: var(--fill-hover); transform: scale(1.05); }
-  .chip:active { transform: scale(.93); }
-
-  .row.bot { position: relative; }
-  .copyBtn {
-    position: absolute; top: 2px; right: 0; width: 26px; height: 26px;
-    border: none; border-radius: 8px; cursor: pointer;
-    background: var(--fill); color: var(--dim);
-    display: grid; place-items: center; opacity: 0;
-    transition: opacity .2s, background .2s, color .2s;
-  }
-  .row.bot:hover .copyBtn { opacity: 1; }
-  .copyBtn:hover { background: var(--fill-hover); color: var(--text); }
-  .copyBtn svg { width: 12px; height: 12px; }
-
   .err {
     width: fit-content; margin: 6px auto; padding: 4px 12px;
-    font-size: 11.5px; color: #ff6961;
-    background: rgba(255,69,58,.12); border: 1px solid rgba(255,69,58,.25);
+    font-size: 11.5px; color: #ff453a;
+    background: rgba(255, 69, 58, .12); border: 1px solid rgba(255, 69, 58, .25);
     border-radius: 999px; animation: rise .38s var(--spring) both;
   }
 
-  #bar { flex: none; display: flex; align-items: flex-end; gap: 9px; padding: 8px 14px 14px; }
+  #bar { flex: none; display: flex; align-items: flex-end; gap: 9px; padding: 8px 15px 15px; }
   #screenBtn2 { background: var(--fill); color: var(--dim); width: 38px; height: 38px; }
   #inPill {
     flex: 1; display: flex; align-items: flex-end; gap: 6px;
@@ -192,7 +212,7 @@
     background: var(--fill); border: 1px solid transparent;
     transition: border-color .25s, background .25s;
   }
-  #inPill:focus-within { border-color: rgba(255,255,255,.25); background: var(--fill-hover); }
+  #inPill:focus-within { border-color: var(--glass-border); background: var(--fill-hover); }
   #input {
     flex: 1; border: none; outline: none; resize: none;
     font: inherit; color: inherit; background: transparent;
@@ -201,7 +221,7 @@
   #input::placeholder { color: var(--dim); }
   #sendBtn {
     flex: none; width: 30px; height: 30px; border: none; border-radius: 50%;
-    background: #fff; color: #1d1d1f; cursor: pointer;
+    background: var(--btn-bg); color: var(--btn-fg); cursor: pointer;
     display: grid; place-items: center;
     transition: transform .18s var(--spring), opacity .2s;
   }
@@ -214,7 +234,7 @@
 <body>
   <!-- summon pill -->
   <div id="pillView" class="glass">
-    <div class="orb pywebview-drag-region" title="Drag to move"></div>
+    <div class="orb" title="Aide"></div>
     <input id="pillInput" placeholder="Ask Aide" autofocus>
     <button class="iconBtn" id="screenBtn1" title="Ask about what's on your screen">
       <svg viewBox="0 0 16 16" fill="none"><rect x="1.5" y="2.5" width="13" height="9" rx="1.8"
@@ -225,7 +245,7 @@
 
   <!-- conversation panel -->
   <div id="panelView" class="glass">
-    <div id="head" class="pywebview-drag-region">
+    <div id="head">
       <button class="ctl" id="closeBtn" title="Collapse (Esc)">
         <svg viewBox="0 0 12 12" fill="none"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor"
           stroke-width="2" stroke-linecap="round"/></svg>
@@ -260,13 +280,21 @@
   </div>
 
 <script>
-  const SIZES = { pill: [660, 92], panel: [660, 580], big: [860, 760] };
+  const SIZES = { pill: [660, 96], panel: [660, 580], big: [860, 760] };
+  const IDLE_COLLAPSE_MS = 75000;
   let state = 'pill', expanded = false;
   const log = document.getElementById('log');
   const input = document.getElementById('input');
   const pillInput = document.getElementById('pillInput');
   const btn = document.getElementById('sendBtn');
   let botEl = null, botRaw = '', busy = false;
+  let draftEl = null, draftText = '', idleTimer = null;
+
+  // easy_drag moves the window from anywhere; let controls and message text
+  // keep their own mouse events (typing, clicking, selecting).
+  document.addEventListener('mousedown', e => {
+    if (e.target.closest('input, textarea, button, a, .msg, pre, .chip')) e.stopPropagation();
+  }, true);
 
   const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
@@ -289,6 +317,17 @@
     return html.replace(/\x00(\d+)\x00/g, (_, i) => blocks[i]);
   }
 
+  function armIdle() {
+    clearTimeout(idleTimer);
+    if (state !== 'panel') return;
+    idleTimer = setTimeout(() => {
+      if (!busy && !input.value.trim()) setState('pill');
+      else armIdle();
+    }, IDLE_COLLAPSE_MS);
+  }
+  ['keydown', 'mousedown', 'mousemove', 'wheel'].forEach(ev =>
+    document.addEventListener(ev, armIdle, { passive: true }));
+
   function setState(s) {
     state = s;
     const [w, h] = s === 'pill' ? SIZES.pill : (expanded ? SIZES.big : SIZES.panel);
@@ -296,6 +335,7 @@
     document.getElementById('pillView').style.display = s === 'pill' ? 'flex' : 'none';
     document.getElementById('panelView').classList.toggle('open', s === 'panel');
     (s === 'pill' ? pillInput : input).focus();
+    armIdle();
   }
 
   function scrollDown() { log.scrollTo({ top: log.scrollHeight, behavior: 'smooth' }); }
@@ -334,7 +374,6 @@
     list_tasks: 'Checking your tasks', due_tasks: 'Checking what’s due',
     complete_task: 'Completing a task', remember: 'Saving to memory', journal: 'Updating journal',
   };
-  let draftEl = null, draftText = '';
 
   function ensureBot() {
     if (!botEl) {
@@ -355,10 +394,10 @@
     removeChips();
     const wrap = document.createElement('div');
     wrap.id = 'chips';
-    [['👁 What’s on my screen', '__SCREEN__'],
-     ['🗓 Plan my day', 'Plan my day: check my tasks and calendar and lay out a plan.'],
-     ['✅ What’s due', 'What tasks are due or overdue?'],
-     ['✉️ Check my email', 'Check my recent email and summarize anything that needs my attention.'],
+    [['What’s on my screen', '__SCREEN__'],
+     ['Plan my day', 'Plan my day: check my tasks and calendar and lay out a plan.'],
+     ['What’s due', 'What tasks are due or overdue?'],
+     ['Check my email', 'Check my recent email and summarize anything that needs my attention.'],
     ].forEach(([label, prompt]) => {
       const b = document.createElement('button');
       b.className = 'chip'; b.textContent = label;
@@ -412,7 +451,9 @@
     busy = false; btn.disabled = false;
     document.body.classList.remove('busy');
     if (state === 'panel') input.focus();
+    armIdle();
   };
+  window.focusInput = () => (state === 'pill' ? pillInput : input).focus();
 
   function submit(text) {
     if (!text || busy) return;
@@ -458,7 +499,6 @@
     if (state === 'panel') setState('pill');
     else try { pywebview.api.hide_window(); } catch (err) {}   // Esc in pill = dismiss; ⌥Space brings it back
   });
-  window.focusInput = () => (state === 'pill' ? pillInput : input).focus();
 
   window.addEventListener('pywebviewready', () => { showChips(); setBusy(true); pywebview.api.greet(); });
 </script>
