@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Secrets — never commit these
+.env
+mcp_servers.json
+
+# Local assistant data (lives in ~/.assistant by default, but just in case)
+.assistant/

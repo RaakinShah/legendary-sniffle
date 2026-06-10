@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "personal-assistant"
+version = "0.1.0"
+description = "A deeply integrated personal assistant built on the Claude Agent SDK"
+requires-python = ">=3.10"
+dependencies = [
+    "claude-agent-sdk>=0.1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+assistant = "assistant.cli:run"
+assistant-briefing = "assistant.briefing:run"
+
+[tool.setuptools.packages.find]
+include = ["assistant*"]

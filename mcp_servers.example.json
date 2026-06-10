@@ -1,0 +1,17 @@
+{
+  "_readme": "Copy to mcp_servers.json (here or in ~/.assistant/). Each server's tools become available to the assistant automatically. ${VARS} are expanded from your environment/.env. See README 'Connecting your life' for credential setup.",
+  "mcpServers": {
+    "gmail": {
+      "command": "npx",
+      "args": ["-y", "@gongrzhe/server-gmail-autoauth-mcp"]
+    },
+    "gcal": {
+      "command": "npx",
+      "args": ["-y", "mcp-google-calendar-plus"],
+      "env": {
+        "GOOGLE_CLIENT_ID": "${GOOGLE_CLIENT_ID}",
+        "GOOGLE_CLIENT_SECRET": "${GOOGLE_CLIENT_SECRET}"
+      }
+    }
+  }
+}
