@@ -64,6 +64,11 @@ class Bridge:
         asyncio.run_coroutine_threadsafe(self._run(text), self.loop)
         return "ok"
 
+    def resize(self, width: int, height: int) -> str:
+        if self.window:
+            self.window.resize(int(width), int(height))
+        return "ok"
+
     def greet(self) -> str:
         return self.send(
             "Session started. Greet me briefly; if anything is overdue or due today, "
@@ -82,21 +87,32 @@ def run() -> None:
         raise SystemExit(1)
 
     bridge = Bridge()
+    # Siri-style summon pill, centered near the top of the screen; expands to a panel.
+    pill_w, pill_h = 660, 92
+    try:
+        screen = webview.screens[0]
+        x, y = (screen.width - pill_w) // 2, int(screen.height * 0.14)
+    except Exception:
+        x = y = None
     kwargs = dict(
         html=HTML_PATH.read_text(),
         js_api=bridge,
-        width=520,
-        height=720,
-        min_size=(380, 480),
+        width=pill_w,
+        height=pill_h,
+        x=x,
+        y=y,
+        frameless=True,
+        easy_drag=False,           # drag via .pywebview-drag-region elements
+        min_size=(380, 60),
     )
     if sys.platform == "darwin":
         # Native NSVisualEffectView blur behind a transparent page background.
         kwargs.update(vibrancy=True, transparent=True)
     try:
         bridge.window = webview.create_window(config.ASSISTANT_NAME, **kwargs)
-    except TypeError:  # older pywebview without vibrancy/transparent kwargs
-        kwargs.pop("vibrancy", None)
-        kwargs.pop("transparent", None)
+    except TypeError:  # older pywebview without some kwargs
+        for k in ("vibrancy", "transparent", "frameless", "easy_drag", "x", "y"):
+            kwargs.pop(k, None)
         bridge.window = webview.create_window(config.ASSISTANT_NAME, **kwargs)
     webview.start()
 
