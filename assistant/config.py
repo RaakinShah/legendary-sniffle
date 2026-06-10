@@ -49,12 +49,15 @@ BRIEFINGS_DIR = ASSISTANT_HOME / "briefings"
 DB_PATH = ASSISTANT_HOME / "assistant.db"
 
 ASSISTANT_NAME = os.environ.get("ASSISTANT_NAME", "Aide")
-MODEL = os.environ.get("ASSISTANT_MODEL", "claude-opus-4-8")
+MODEL = os.environ.get("ASSISTANT_MODEL", "claude-fable-5")  # most capable tier
 
 # Full system access: the assistant can read/act anywhere in your home directory
 # without per-action approval. Set ASSISTANT_FULL_ACCESS=0 to sandbox it back to
 # ASSISTANT_HOME + ASSISTANT_ALLOWED_DIRS with edit confirmation.
 FULL_ACCESS = os.environ.get("ASSISTANT_FULL_ACCESS", "1") != "0"
+
+# Ambient recall: background observer remembers what you were doing (local only).
+RECALL = os.environ.get("ASSISTANT_RECALL", "1") != "0"
 
 
 AUTH_HELP = """No Claude credentials found. Two options:

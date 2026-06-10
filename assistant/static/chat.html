@@ -9,7 +9,7 @@
     color-scheme: light dark;
     --glass: rgba(244, 244, 248, 0.96);
     --glass-tint: rgba(248, 248, 252, 0.42);
-    --glass-border: rgba(0, 0, 0, 0.10);
+    --glass-border: rgba(0, 0, 0, 0.06);
     --sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.60), rgba(255, 255, 255, 0) 34%);
     --bubble: linear-gradient(180deg, rgba(120, 120, 128, 0.20), rgba(120, 120, 128, 0.13));
     --shadow:
@@ -152,9 +152,10 @@
       transparent 0, #000 12px, #000 calc(100% - 10px), transparent 100%);
   }
   /* nearly-empty conversations breathe in the middle instead of hugging the top */
-  #log.center { display: flex; flex-direction: column; justify-content: center; }
+  #log.center { display: flex; flex-direction: column; justify-content: center; align-items: center; }
   #log.center #chips { justify-content: center; }
   #log.center .row.bot { justify-content: center; }
+  #log.center > * { width: auto; }
   #panelView.closing { animation: shrink .16s ease-in both; }
   @keyframes shrink { to { opacity: 0; transform: scale(.97) translateY(-4px); } }
   .orb.pop { animation: orb 7s linear infinite, glow 4.5s ease-in-out infinite, pop .5s var(--spring); }
@@ -245,6 +246,7 @@
 
   .tool {
     display: inline-flex; align-items: center; gap: 6px;
+    width: fit-content; align-self: flex-start;
     margin: 2px 8px 2px 0; padding: 3px 10px;
     font-size: 11px; font-weight: 500; color: var(--dim); opacity: .8;
     background: var(--code-bg); border-radius: 999px;
@@ -280,14 +282,13 @@
   #inPill {
     flex: 1; display: flex; align-items: flex-end; gap: 6px;
     padding: 6px 6px 6px 15px; border-radius: 22px;
-    background: var(--fill); border: 1px solid var(--glass-border);
-    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.08);
+    background: var(--fill); border: 1px solid transparent;
     transition: border-color .25s, background .25s, box-shadow .25s;
   }
   #inPill:focus-within {
     background: var(--fill-hover);
-    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.08), 0 0 0 3px rgba(10, 132, 255, 0.18);
-    border-color: rgba(10, 132, 255, 0.45);
+    box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.15);
+    border-color: rgba(10, 132, 255, 0.35);
   }
   #input {
     flex: 1; border: none; outline: none; resize: none;
@@ -480,7 +481,10 @@
     capture_screen: 'Looking at your screen', add_task: 'Adding a task',
     list_tasks: 'Checking your tasks', due_tasks: 'Checking what’s due',
     complete_task: 'Completing a task', remember: 'Saving to memory', journal: 'Updating journal',
+    ToolSearch: 'Getting ready', Task: 'Working on it', NotebookEdit: 'Editing a notebook',
+    recall_timeline: 'Checking your activity', recall_screenshot: 'Looking back in time',
   };
+  const toolLabel = n => TOOL_NAMES[n] || n.replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2');
 
   function ensureBot() {
     if (!botEl) {
@@ -545,7 +549,7 @@
     const short = name.replace(/^mcp__\w+__/, '');
     const chip = document.createElement('div');
     chip.className = 'tool';
-    chip.innerHTML = `<span class="pulse"></span>${esc(TOOL_NAMES[short] || short)}`;
+    chip.innerHTML = `<span class="pulse"></span>${esc(toolLabel(short))}`;
     log.appendChild(chip); scrollDown(); showTyping();
   };
   window.done = err => {

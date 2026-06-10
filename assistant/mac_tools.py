@@ -99,5 +99,64 @@ async def _capture(display: int) -> dict[str, Any]:
     }
 
 
+@tool(
+    name="recall_timeline",
+    description=(
+        "Look back at what the user was doing on this Mac (ambient recall). Returns a "
+        "timeline of apps and window titles. Use it when the user asks what they were "
+        "working on, where they saw something, what that site/document was, or to "
+        "reconstruct their day. Filter with `query` (matches app or window title)."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "since_hours": {"type": "number", "description": "How far back to look (default 24, max 72)"},
+            "query": {"type": "string", "description": "Case-insensitive filter, e.g. 'safari' or 'invoice'"},
+        },
+    },
+)
+async def recall_timeline(args: dict[str, Any]) -> dict[str, Any]:
+    from . import observer
+    hours = min(float(args.get("since_hours", 24)), 72)
+    return _text(observer.timeline(hours, str(args.get("query", ""))))
+
+
+@tool(
+    name="recall_screenshot",
+    description=(
+        "Retrieve the ambient screenshot closest to a time, to see what was on the "
+        "user's screen back then. Use after recall_timeline narrows down WHEN something "
+        "happened. `when` like '2026-06-10 14:30', or empty for the most recent."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {"when": {"type": "string", "description": "Approximate time, e.g. 2026-06-10 14:30"}},
+    },
+)
+async def recall_screenshot(args: dict[str, Any]) -> dict[str, Any]:
+    from . import observer
+    path = observer.nearest_shot(str(args.get("when", "")))
+    if not path:
+        return _text("No ambient screenshots recorded yet.", is_error=True)
+    data = base64.standard_b64encode(Path(path).read_bytes()).decode()
+    stamp = Path(path).stem
+    return {
+        "content": [
+            {"type": "image", "data": data, "mimeType": "image/jpeg"},
+            {"type": "text", "text": f"Screen at {stamp[:8]} {stamp[9:11]}:{stamp[11:13]}."},
+        ]
+    }
+
+
+def _text(message: str, is_error: bool = False) -> dict[str, Any]:
+    result: dict[str, Any] = {"content": [{"type": "text", "text": message}]}
+    if is_error:
+        result["is_error"] = True
+    return result
+
+
 def build_server():
-    return create_sdk_mcp_server(name="mac", version="1.0.0", tools=[capture_screen])
+    return create_sdk_mcp_server(
+        name="mac", version="1.0.0",
+        tools=[capture_screen, recall_timeline, recall_screenshot],
+    )

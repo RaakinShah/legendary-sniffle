@@ -105,6 +105,9 @@ class Bridge:
                         )
                         radius = height / 2.0 if height <= 110 else 28.0
                         win.contentView().layer().setCornerRadius_(radius)
+                        eff = getattr(self, "_ns_effect", None)
+                        if eff is not None:
+                            eff.layer().setCornerRadius_(radius)
                         win.setFrame_display_animate_(nf, True, True)  # smooth native morph
                         win.invalidateShadow()
                     except Exception:
@@ -244,10 +247,14 @@ def _native_glass(bridge: Bridge) -> None:
                 effect.setBlendingMode_(AppKit.NSVisualEffectBlendingModeBehindWindow)
                 effect.setState_(AppKit.NSVisualEffectStateActive)
                 effect.setAutoresizingMask_(AppKit.NSViewWidthSizable | AppKit.NSViewHeightSizable)
+                effect.setWantsLayer_(True)
+                effect.layer().setCornerRadius_(win.frame().size.height / 2.0)
+                effect.layer().setMasksToBounds_(True)
                 content.addSubview_positioned_relativeTo_(effect, AppKit.NSWindowBelow, None)
                 win.setHasShadow_(True)
                 win.invalidateShadow()
                 bridge._ns_window = win
+                bridge._ns_effect = effect
                 bridge.window.evaluate_js("window.nativeGlass && nativeGlass(true)")
             except Exception:
                 pass
@@ -259,9 +266,10 @@ def _native_glass(bridge: Bridge) -> None:
 def _install_hotkey(bridge: Bridge) -> None:
     """Post-start setup: native glass, capture hooks, global ⌥Space summon/dismiss."""
     if sys.platform == "darwin":
-        from . import mac_tools
+        from . import mac_tools, observer
         mac_tools.before_capture = bridge.window.hide
         mac_tools.after_capture = bridge.window.show
+        observer.start()   # ambient recall (ASSISTANT_RECALL=0 to disable)
         _native_glass(bridge)
     try:
         from pynput import keyboard
