@@ -145,6 +145,9 @@
   #head .ctl:hover { background: var(--fill-hover); color: var(--text); transform: scale(1.07); }
   #head .ctl:active { transform: scale(.85); }
   #head .ctl svg { width: 12px; height: 12px; }
+  #recallBtn svg { width: 14px; height: 14px; }
+  #recallBtn.off { color: #ff9f0a; background: rgba(255, 159, 10, 0.14); }
+  #recallBtn.off .slash { display: inline !important; }
 
   #log {
     flex: 1; overflow-y: auto; padding: 16px 26px 16px;
@@ -342,6 +345,15 @@
       <div class="spacer"></div>
       <div class="orbWrap"><div class="orb"></div></div>
       <div class="spacer"></div>
+      <button class="ctl" id="recallBtn" title="Pause ambient memory">
+        <svg viewBox="0 0 14 14" fill="none">
+          <path d="M1.5 7s2-3.5 5.5-3.5S12.5 7 12.5 7s-2 3.5-5.5 3.5S1.5 7 1.5 7Z"
+            stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+          <circle cx="7" cy="7" r="1.6" stroke="currentColor" stroke-width="1.4"/>
+          <path class="slash" d="M2.5 12L11.5 2" stroke="currentColor" stroke-width="1.6"
+            stroke-linecap="round" style="display:none"/>
+        </svg>
+      </button>
       <button class="ctl" id="newBtn" title="New conversation">
         <svg viewBox="0 0 12 12" fill="none"><path d="M6 1.5v9M1.5 6h9" stroke="currentColor"
           stroke-width="2" stroke-linecap="round"/></svg>
@@ -484,6 +496,7 @@
     ToolSearch: 'Getting ready', Task: 'Working on it', NotebookEdit: 'Editing a notebook',
     recall_timeline: 'Checking your activity', recall_screenshot: 'Looking back in time',
     recall_search: 'Searching your screen memory',
+    recall_pause: 'Pausing ambient memory', recall_forget: 'Forgetting',
   };
   const toolLabel = n => TOOL_NAMES[n] || n.replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2');
 
@@ -614,6 +627,14 @@
   document.getElementById('screenBtn2').onclick = askScreen;
   document.getElementById('closeBtn').onclick = collapse;
   document.getElementById('expandBtn').onclick = () => { expanded = !expanded; setState('panel'); };
+  document.getElementById('recallBtn').onclick = async () => {
+    const b = document.getElementById('recallBtn');
+    try {
+      const off = await pywebview.api.toggle_recall();
+      b.classList.toggle('off', !!off);
+      b.title = off ? 'Ambient memory paused — click to resume' : 'Pause ambient memory';
+    } catch (e) {}
+  };
   document.getElementById('newBtn').onclick = () => {
     if (busy) return;
     log.innerHTML = ''; botEl = null; botRaw = ''; clearDraft();

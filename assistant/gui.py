@@ -154,6 +154,14 @@ class Bridge:
         except Exception:
             pass
 
+    def toggle_recall(self) -> bool:
+        """Flip the ambient observer from the UI. Returns True if now paused."""
+        try:
+            from . import observer
+            return observer.set_paused(not observer.paused)
+        except Exception:
+            return False
+
     def new_chat(self) -> str:
         asyncio.run_coroutine_threadsafe(self._drop_client(), self.loop)
         return "ok"

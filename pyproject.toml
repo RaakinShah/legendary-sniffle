@@ -23,6 +23,7 @@ gui = [
 assistant = "assistant.cli:run"
 assistant-gui = "assistant.gui:run"
 assistant-briefing = "assistant.briefing:run"
+assistant-insights = "assistant.insights:run"
 
 [tool.setuptools.packages.find]
 include = ["assistant*"]

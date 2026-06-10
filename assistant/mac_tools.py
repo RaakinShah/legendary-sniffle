@@ -141,6 +141,43 @@ async def recall_search(args: dict[str, Any]) -> dict[str, Any]:
 
 
 @tool(
+    name="recall_pause",
+    description=(
+        "Pause or resume ambient recall (the background observer). Use when the user "
+        "says to stop watching / pause tracking / 'don't record this' (pause), or to "
+        "start again (resume)."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {"paused": {"type": "boolean", "description": "true = pause, false = resume"}},
+        "required": ["paused"],
+    },
+)
+async def recall_pause(args: dict[str, Any]) -> dict[str, Any]:
+    from . import observer
+    state = observer.set_paused(bool(args.get("paused", True)))
+    return _text("Ambient recall paused." if state else "Ambient recall resumed.")
+
+
+@tool(
+    name="recall_forget",
+    description=(
+        "Erase recent ambient recall (timeline, screen text, screenshots). Use when the "
+        "user says 'forget what you just saw', 'wipe the last hour', or 'delete "
+        "everything you've recorded'. hours=0 erases ALL recall."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {"hours": {"type": "number", "description": "How far back to erase; 0 = everything"}},
+        "required": ["hours"],
+    },
+)
+async def recall_forget(args: dict[str, Any]) -> dict[str, Any]:
+    from . import observer
+    return _text(observer.forget(float(args.get("hours", 1))))
+
+
+@tool(
     name="recall_screenshot",
     description=(
         "Retrieve the ambient screenshot closest to a time, to see what was on the "
@@ -177,5 +214,6 @@ def _text(message: str, is_error: bool = False) -> dict[str, Any]:
 def build_server():
     return create_sdk_mcp_server(
         name="mac", version="1.0.0",
-        tools=[capture_screen, recall_timeline, recall_search, recall_screenshot],
+        tools=[capture_screen, recall_timeline, recall_search, recall_screenshot,
+               recall_pause, recall_forget],
     )

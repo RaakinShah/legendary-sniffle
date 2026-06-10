@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
-# macOS integration: start the GUI at login + run the daily briefing via launchd.
-# Usage: ./scripts/install_macos.sh [briefing-time HH:MM]   (default 07:30)
+# macOS integration via launchd: GUI at login, morning briefing, evening insights.
+# Usage: ./scripts/install_macos.sh [briefing-time HH:MM] [insights-time HH:MM]
+#        (defaults 07:30 and 21:30)
 set -euo pipefail
 [[ "$(uname)" == "Darwin" ]] || { echo "macOS only." >&2; exit 1; }
 
 TIME="${1:-07:30}"; HOUR="${TIME%%:*}"; MIN="${TIME##*:}"
+ITIME="${2:-21:30}"; IHOUR="${ITIME%%:*}"; IMIN="${ITIME##*:}"
 GUI_BIN="$(command -v assistant-gui || true)"
 BRIEF_BIN="$(command -v assistant-briefing || true)"
-[[ -n "$GUI_BIN" && -n "$BRIEF_BIN" ]] || { echo "Run: pip install -e '.[gui]' first" >&2; exit 1; }
+INSIGHTS_BIN="$(command -v assistant-insights || true)"
+[[ -n "$GUI_BIN" && -n "$BRIEF_BIN" && -n "$INSIGHTS_BIN" ]] || { echo "Run: pip install -e '.[gui]' first" >&2; exit 1; }
 
 AGENTS="$HOME/Library/LaunchAgents"; mkdir -p "$AGENTS"
 LOG="${ASSISTANT_HOME:-$HOME/.assistant}"; mkdir -p "$LOG"
@@ -35,7 +38,10 @@ launchctl load "$AGENTS/$1.plist"
 write_plist "com.aide.gui" "$GUI_BIN" "<key>RunAtLoad</key><true/>"
 write_plist "com.aide.briefing" "$BRIEF_BIN" \
   "<key>StartCalendarInterval</key><dict><key>Hour</key><integer>$HOUR</integer><key>Minute</key><integer>$MIN</integer></dict>"
+write_plist "com.aide.insights" "$INSIGHTS_BIN" \
+  "<key>StartCalendarInterval</key><dict><key>Hour</key><integer>$IHOUR</integer><key>Minute</key><integer>$IMIN</integer></dict>"
 
 echo "Installed:"
-echo "  com.aide.gui      — chat window opens at login"
-echo "  com.aide.briefing — daily briefing at $TIME (notification when ready)"
+echo "  com.aide.gui      — assistant opens at login (⌥Space to summon)"
+echo "  com.aide.briefing — morning briefing at $TIME (notification when ready)"
+echo "  com.aide.insights — evening digest at $ITIME (distills the day into memory)"

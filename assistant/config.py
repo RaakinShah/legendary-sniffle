@@ -46,6 +46,7 @@ ASSISTANT_HOME = _expand(os.environ.get("ASSISTANT_HOME", "~/.assistant"))
 MEMORY_DIR = ASSISTANT_HOME / "memory"
 JOURNAL_DIR = MEMORY_DIR / "journal"
 BRIEFINGS_DIR = ASSISTANT_HOME / "briefings"
+INSIGHTS_DIR = ASSISTANT_HOME / "insights"
 DB_PATH = ASSISTANT_HOME / "assistant.db"
 
 ASSISTANT_NAME = os.environ.get("ASSISTANT_NAME", "Aide")
@@ -61,6 +62,17 @@ FULL_ACCESS = os.environ.get("ASSISTANT_FULL_ACCESS", "1") != "0"
 
 # Ambient recall: background observer remembers what you were doing (local only).
 RECALL = os.environ.get("ASSISTANT_RECALL", "1") != "0"
+
+# Apps/window-title substrings the observer must never record (case-insensitive),
+# in addition to private/incognito browser windows. Extend via env, comma-separated.
+RECALL_EXCLUDE = frozenset(
+    x.strip().lower()
+    for x in (
+        "1Password,Passwords,Keychain Access,Bitwarden,LastPass,"
+        + os.environ.get("ASSISTANT_RECALL_EXCLUDE", "")
+    ).split(",")
+    if x.strip()
+)
 
 
 AUTH_HELP = """No Claude credentials found. Two options:
@@ -95,7 +107,7 @@ def allowed_dirs() -> list[str]:
 
 
 def ensure_dirs() -> None:
-    for d in (ASSISTANT_HOME, MEMORY_DIR, JOURNAL_DIR, BRIEFINGS_DIR):
+    for d in (ASSISTANT_HOME, MEMORY_DIR, JOURNAL_DIR, BRIEFINGS_DIR, INSIGHTS_DIR):
         d.mkdir(parents=True, exist_ok=True)
 
 

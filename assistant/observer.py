@@ -17,14 +17,35 @@ import time
 
 from . import config
 
-OBSERVE_EVERY = 30
-SHOT_EVERY = 300
+_env = __import__("os").environ
+OBSERVE_EVERY = int(_env.get("ASSISTANT_OBSERVE_SECONDS", "5"))   # near-continuous sampling
+SHOT_EVERY = 60         # heartbeat: at most this long between OCR shots
+MIN_SHOT_GAP = 8        # debounce: at least this long between OCR shots
 # Long memory by default: 30 days (ASSISTANT_RECALL_DAYS to change).
-RETAIN_HOURS = 24 * int(__import__("os").environ.get("ASSISTANT_RECALL_DAYS", "30"))
+RETAIN_HOURS = 24 * int(_env.get("ASSISTANT_RECALL_DAYS", "30"))
 SHOT_DIR = config.ASSISTANT_HOME / "recall"
 DB = config.ASSISTANT_HOME / "recall.db"
 
 _started = False
+paused = False
+_last_text_hash = ""
+
+PRIVATE_MARKERS = ("private browsing", "incognito", "inprivate")
+
+
+def set_paused(value: bool) -> bool:
+    """Pause/resume all ambient recording. Returns the new state."""
+    global paused
+    paused = bool(value)
+    return paused
+
+
+def _is_private(app: str, title: str) -> bool:
+    """Littlebird-style selective visibility: never record private contexts."""
+    hay = f"{app} {title}".lower()
+    if any(m in title.lower() for m in PRIVATE_MARKERS):
+        return True
+    return any(x in hay for x in config.RECALL_EXCLUDE)
 
 
 def _conn() -> sqlite3.Connection:
@@ -81,20 +102,30 @@ def _frontmost() -> tuple[str, str]:
     return app, title
 
 
-def _snapshot(con: sqlite3.Connection, now: dt.datetime, app: str, title: str) -> None:
+def _snapshot(con: sqlite3.Connection, now: dt.datetime, app: str, title: str) -> bool:
+    """Capture + OCR the screen. Dedupes: unchanged screen text is discarded,
+    so continuous capture stays cheap when nothing is happening."""
+    global _last_text_hash
     SHOT_DIR.mkdir(parents=True, exist_ok=True)
-    path = SHOT_DIR / f"{now.strftime('%Y%m%d-%H%M')}.jpg"
+    path = SHOT_DIR / f"{now.strftime('%Y%m%d-%H%M%S')}.jpg"
     subprocess.run(["screencapture", "-x", "-t", "jpg", str(path)], capture_output=True)
     if not path.exists():
-        return
+        return False
     text = _ocr(path)  # OCR BEFORE downscaling for accuracy
-    subprocess.run(["sips", "--resampleWidth", "1024", str(path)], capture_output=True)
     if text:
+        import hashlib
+        h = hashlib.sha1(text.encode()).hexdigest()
+        if h == _last_text_hash:           # nothing changed on screen
+            path.unlink(missing_ok=True)
+            return False
+        _last_text_hash = h
         con.execute(
             "INSERT INTO screen_fts VALUES (?,?,?,?)",
             (now.isoformat(timespec="seconds"), app, title, text),
         )
         con.commit()
+    subprocess.run(["sips", "--resampleWidth", "1024", str(path)], capture_output=True)
+    return True
 
 
 def _prune(con: sqlite3.Connection, now: dt.datetime) -> None:
@@ -111,21 +142,33 @@ def _prune(con: sqlite3.Connection, now: dt.datetime) -> None:
 
 def _loop() -> None:
     last_shot = 0.0
+    last_prune = 0.0
+    prev_key: tuple[str, str] | None = None
     con = _conn()
     while True:
         try:
+            if paused:
+                time.sleep(OBSERVE_EVERY)
+                continue
             now = dt.datetime.now()
             app, title = _frontmost()
-            if app:
+            if app and not _is_private(app, title):
                 con.execute(
                     "INSERT INTO activity VALUES (?,?,?)",
                     (now.isoformat(timespec="seconds"), app, title),
                 )
                 con.commit()
-            if time.time() - last_shot >= SHOT_EVERY:
-                last_shot = time.time()
-                _snapshot(con, now, app, title)
-                _prune(con, now)
+                key = (app, title)
+                changed = prev_key is not None and key != prev_key
+                prev_key = key
+                due = time.time() - last_shot >= SHOT_EVERY
+                debounced = time.time() - last_shot >= MIN_SHOT_GAP
+                if due or (changed and debounced):
+                    last_shot = time.time()
+                    _snapshot(con, now, app, title)
+                if time.time() - last_prune >= 1800:
+                    last_prune = time.time()
+                    _prune(con, now)
         except Exception:
             pass
         time.sleep(OBSERVE_EVERY)
@@ -227,6 +270,12 @@ def search_screen(query: str, limit: int = 20) -> str:
     return "\n".join(out)
 
 
+def _stamp14(s: str) -> int:
+    """Normalize any timestamp-ish string to a comparable 14-digit YYYYmmddHHMMSS int."""
+    digits = "".join(ch for ch in s if ch.isdigit())[:14]
+    return int(digits.ljust(14, "0") or "0")
+
+
 def nearest_shot(when: str = "") -> str | None:
     """Path of the screenshot closest to `when` (ISO-ish or empty for latest)."""
     if not SHOT_DIR.is_dir():
@@ -236,6 +285,33 @@ def nearest_shot(when: str = "") -> str | None:
         return None
     if not when:
         return str(shots[-1])
-    want = when.replace("-", "").replace(":", "").replace("T", "-").replace(" ", "-")[:13]
-    best = min(shots, key=lambda f: abs(int(f.stem.replace("-", "")) - int(want.replace("-", "") or 0)))
-    return str(best)
+    want = _stamp14(when)
+    return str(min(shots, key=lambda f: abs(_stamp14(f.stem) - want)))
+
+
+def forget(hours: float | None = None) -> str:
+    """Delete recent recall (timeline, screen text, screenshots). None = everything."""
+    if hours is not None and hours <= 0:
+        hours = None
+    cutoff = (
+        (dt.datetime.now() - dt.timedelta(hours=hours)).isoformat(timespec="seconds")
+        if hours is not None else None
+    )
+    rows = 0
+    if DB.exists():
+        con = _conn()
+        for table in ("activity", "screen_fts"):
+            cur = (con.execute(f"DELETE FROM {table} WHERE ts >= ?", (cutoff,))
+                   if cutoff else con.execute(f"DELETE FROM {table}"))
+            rows += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+        con.commit()
+        con.close()
+    shots = 0
+    if SHOT_DIR.is_dir():
+        floor = _stamp14(cutoff) if cutoff else 0
+        for f in SHOT_DIR.glob("*.jpg"):
+            if _stamp14(f.stem) >= floor:
+                f.unlink(missing_ok=True)
+                shots += 1
+    scope = f"the last {hours:g} hours" if hours is not None else "everything"
+    return f"Forgot {scope}: removed {rows} timeline/text entries and {shots} screenshots."
