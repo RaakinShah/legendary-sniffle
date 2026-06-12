@@ -35,6 +35,10 @@ RETAIN_HOURS = config.RECALL_RETAIN_HOURS
 _started = False
 paused = False
 _last_text_hash = ""
+# Hash of the last shot's (downscaled) image bytes. If the next shot is byte
+# identical we skip the Vision OCR call entirely: the text-hash dedupe below
+# would discard it anyway, so this only avoids the redundant compute.
+_last_img_hash = ""
 # Most recent (non-private) frontmost app/title plus the monotonic time it was
 # sampled. The loop keeps this warm so current_context() can answer instantly
 # instead of spawning osascript on the GUI's event loop for every message.
@@ -66,17 +70,7 @@ def _is_private(app: str, title: str) -> bool:
             or any(x in hay for x in config.RECALL_EXCLUDE))
 
 
-def _conn() -> sqlite3.Connection:
-    db = _db_path()
-    db.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(db)
-    # WAL lets the agent read recall while the observer thread writes it, without
-    # either blocking the other; NORMAL sync is the right pairing for WAL. The
-    # busy timeout covers the moments the observer thread and the main thread
-    # write at once, instead of an instant "database is locked".
-    con.execute("PRAGMA journal_mode=WAL")
-    con.execute("PRAGMA synchronous=NORMAL")
-    con.execute("PRAGMA busy_timeout=5000")
+def _schema(con: sqlite3.Connection) -> None:
     con.execute("CREATE TABLE IF NOT EXISTS activity (ts TEXT, app TEXT, title TEXT)")
     con.execute("CREATE INDEX IF NOT EXISTS idx_ts ON activity(ts)")
     con.execute(
@@ -86,11 +80,12 @@ def _conn() -> sqlite3.Connection:
     # Ambient-understanding digests: periodic 1-2 sentence summaries of what the
     # user has actually been doing, distilled from timeline + screen text.
     con.execute("CREATE TABLE IF NOT EXISTS digest (ts TEXT, summary TEXT)")
-    # Migration anchor for future schema changes; v1 is fully described by the
-    # additive CREATE IF NOT EXISTS statements above.
-    if con.execute("PRAGMA user_version").fetchone()[0] == 0:
-        con.execute("PRAGMA user_version=1")
-    return con
+
+
+def _conn() -> sqlite3.Connection:
+    # row_factory stays off: recall reads rows positionally throughout.
+    from . import db
+    return db.open_db(_db_path(), _schema, row_factory=False)
 
 
 def _ocr(path) -> str:
@@ -146,32 +141,141 @@ def _frontmost() -> tuple[str, str]:
     return app.strip(), title.strip()
 
 
+def _frontmost_app() -> str:
+    """Frontmost app NAME with no subprocess: NSWorkspace reads it in-process.
+    Runs every 5s tick, so dropping the osascript fork here is the big save.
+    Returns "" on any failure; the caller then leans on the osascript path."""
+    try:
+        import AppKit
+        front = AppKit.NSWorkspace.sharedWorkspace().frontmostApplication()
+        name = front.localizedName() if front is not None else None
+        return str(name) if name else ""
+    except Exception as exc:  # noqa: BLE001 - no AppKit just means use osascript
+        log.debug("native frontmost app read failed: %s", exc)
+        return ""
+
+
+def _display_asleep() -> bool:
+    """True if the main display is asleep/off. A black screen has no text, so
+    we skip the shot. Unknown (no Quartz) returns False: better to capture."""
+    try:
+        import Quartz
+        return bool(Quartz.CGDisplayIsAsleep(Quartz.CGMainDisplayID()))
+    except Exception:  # noqa: BLE001 - if we can't tell, don't block capture
+        return False
+
+
+def _grab(path) -> bool:
+    """Capture the main display in-process via Quartz, downscale to ~1024px wide,
+    and write a JPEG with ImageIO. No screencapture/sips forks. Returns True on
+    success; on ANY failure the caller falls back to the subprocess path."""
+    import Quartz
+    import Foundation
+    img = Quartz.CGDisplayCreateImage(Quartz.CGMainDisplayID())
+    if img is None:
+        return False
+    w = Quartz.CGImageGetWidth(img)
+    h = Quartz.CGImageGetHeight(img)
+    if not w or not h:
+        return False
+    target_w = 1024
+    if w > target_w:                       # downscale; OCR runs on this (B6)
+        scale = target_w / float(w)
+        nw, nh = max(1, int(w * scale)), max(1, int(h * scale))
+        cs = Quartz.CGColorSpaceCreateDeviceRGB()
+        ctx = Quartz.CGBitmapContextCreate(
+            None, nw, nh, 8, 0, cs,
+            Quartz.kCGImageAlphaPremultipliedFirst | Quartz.kCGBitmapByteOrder32Little,
+        )
+        if ctx is None:
+            return False
+        Quartz.CGContextSetInterpolationQuality(ctx, Quartz.kCGInterpolationHigh)
+        Quartz.CGContextDrawImage(ctx, Quartz.CGRectMake(0, 0, nw, nh), img)
+        scaled = Quartz.CGBitmapContextCreateImage(ctx)
+        if scaled is None:
+            return False
+        img = scaled
+    url = Foundation.NSURL.fileURLWithPath_(str(path))
+    # "public.jpeg" is the JPEG UTI; passing the string dodges fragile constant imports.
+    dest = Quartz.CGImageDestinationCreateWithURL(url, "public.jpeg", 1, None)
+    if dest is None:
+        return False
+    Quartz.CGImageDestinationAddImage(
+        dest, img, {Quartz.kCGImageDestinationLossyCompressionQuality: 0.6})
+    return bool(Quartz.CGImageDestinationFinalize(dest))
+
+
+def _img_hash(data: bytes) -> str:
+    import hashlib
+    return hashlib.sha1(data).hexdigest()
+
+
+def _should_ocr(img_hash: str, prev_img_hash: str) -> bool:
+    """OCR is worth running only if the image bytes changed since the last shot.
+    A byte-identical frame would yield identical text the text-hash dedupe drops
+    anyway, so skipping here saves the Vision call without changing any data."""
+    return bool(img_hash) and img_hash != prev_img_hash
+
+
 def _snapshot(con: sqlite3.Connection, now: dt.datetime, app: str, title: str) -> bool:
     """Capture + OCR the screen. Dedupes: unchanged screen text is discarded,
     so continuous capture stays cheap when nothing is happening."""
-    global _last_text_hash
+    global _last_text_hash, _last_img_hash
+    # A black screen (display asleep/locked) has no text: skip the whole shot.
+    if _display_asleep():
+        return False
     shot_dir = _shot_dir()
     shot_dir.mkdir(parents=True, exist_ok=True)
     # Microseconds in the name so two captures in the same second (heartbeat +
     # app-switch debounce landing together) can't overwrite each other.
     path = shot_dir / f"{now.strftime('%Y%m%d-%H%M%S-%f')}.jpg"
-    subprocess.run(["screencapture", "-x", "-t", "jpg", str(path)], capture_output=True)
+    # Native Quartz capture (already downscaled to ~1024px). On ANY failure fall
+    # back to the screencapture + sips subprocesses so capture never stops.
+    native = False
+    try:
+        native = _grab(path)
+    except Exception as exc:  # noqa: BLE001 - degrade to the subprocess path
+        log.debug("native screen grab failed, using screencapture: %s", exc)
+        native = False
+    if not native:
+        subprocess.run(
+            ["screencapture", "-x", "-t", "jpg", str(path)], capture_output=True)
     if not path.exists():
         return False
-    text = _ocr(path)  # OCR BEFORE downscaling for accuracy
-    if text:
-        import hashlib
-        h = hashlib.sha1(text.encode()).hexdigest()
-        if h == _last_text_hash:           # nothing changed on screen
+    # Skip the Vision OCR if this frame is byte-identical to the last shot's
+    # image: same pixels yield text the text-hash dedupe would drop anyway (B6).
+    img_hash = ""
+    try:
+        img_hash = _img_hash(path.read_bytes())
+    except OSError:
+        img_hash = ""
+    if not _should_ocr(img_hash, _last_img_hash):
+        # Identical pixels to the last shot: the OCR text would match too, so
+        # the old text-hash path would have unlinked this file. Do the same here
+        # to keep disk behavior unchanged while skipping the Vision call.
+        if img_hash:
             path.unlink(missing_ok=True)
             return False
-        _last_text_hash = h
-        con.execute(
-            "INSERT INTO screen_fts VALUES (?,?,?,?)",
-            (now.isoformat(timespec="seconds"), app, title, text),
-        )
-        con.commit()
-    subprocess.run(["sips", "--resampleWidth", "1024", str(path)], capture_output=True)
+    else:
+        _last_img_hash = img_hash
+        text = _ocr(path)
+        if text:
+            import hashlib
+            h = hashlib.sha1(text.encode()).hexdigest()
+            if h == _last_text_hash:           # nothing changed on screen
+                path.unlink(missing_ok=True)
+                return False
+            _last_text_hash = h
+            con.execute(
+                "INSERT INTO screen_fts VALUES (?,?,?,?)",
+                (now.isoformat(timespec="seconds"), app, title, text),
+            )
+            con.commit()
+    # The subprocess fallback writes a full-res file; sips downscales it to match
+    # the native path. The native grab is already ~1024px wide, so skip sips there.
+    if not native:
+        subprocess.run(
+            ["sips", "--resampleWidth", "1024", str(path)], capture_output=True)
     return True
 
 
@@ -285,12 +389,29 @@ def _make_digest(con: sqlite3.Connection, now: dt.datetime) -> None:
     log.info("ambient digest updated")
 
 
+def _lower_thread_qos() -> None:
+    """Best-effort: drop THIS thread to background QoS so the observer's capture
+    and OCR spikes yield to foreground work. os.nice is process-wide, so use the
+    per-thread pthread QoS instead. Guarded: a failure just leaves QoS default."""
+    try:
+        import ctypes
+        import ctypes.util
+        lib = ctypes.CDLL(ctypes.util.find_library("System") or "/usr/lib/libSystem.dylib")
+        QOS_CLASS_BACKGROUND = 0x09
+        lib.pthread_set_qos_class_self_np(ctypes.c_int(QOS_CLASS_BACKGROUND), ctypes.c_int(0))
+    except Exception as exc:  # noqa: BLE001 - QoS is a nicety, never a requirement
+        log.debug("could not lower observer thread QoS: %s", exc)
+
+
 def _loop() -> None:
     global _latest
+    _lower_thread_qos()              # runs on the observer thread: lowers its own QoS
     last_shot = 0.0
     last_prune = 0.0
     last_digest = time.time()        # first digest one interval after launch
     prev_key: tuple[str, str] | None = None
+    prev_app: str | None = None      # app name from the last tick (native sample)
+    cur_title = ""                   # last window title read via osascript
     con = _conn()
     while True:
         try:
@@ -298,7 +419,30 @@ def _loop() -> None:
                 time.sleep(OBSERVE_EVERY)
                 continue
             now = dt.datetime.now()
-            app, title = _frontmost()
+            # Cheap 5s tick: app name via NSWorkspace, no fork. NSWorkspace gives
+            # the app but not the window title, so we reuse the last title read
+            # and refresh it (via the osascript path) only at the shot beat below.
+            native = True
+            app = _frontmost_app()
+            title = cur_title
+            if not app:                          # no AppKit: fall back, gets title too
+                native = False
+                app, title = _frontmost()
+                cur_title = title
+            # Shot timing. App switches are still caught every tick (the native
+            # app name is fresh); title switches surface at the shot beat. Only
+            # refresh the title via osascript when a shot will actually fire, so
+            # the per-tick osascript fork is gone.
+            due = time.time() - last_shot >= SHOT_EVERY
+            debounced = time.time() - last_shot >= MIN_SHOT_GAP
+            app_changed = prev_app is not None and app != prev_app
+            prev_app = app
+            will_shot = bool(app) and (due or (app_changed and debounced))
+            if will_shot and native:
+                fa, ft = _frontmost()            # one osascript only at shot cadence
+                if fa:
+                    app, title = fa, ft
+                cur_title = title
             if app and not _is_private(app, title):
                 _latest = (app, title, time.monotonic())   # keep ambient context warm
                 con.execute(
@@ -309,8 +453,6 @@ def _loop() -> None:
                 key = (app, title)
                 changed = prev_key is not None and key != prev_key
                 prev_key = key
-                due = time.time() - last_shot >= SHOT_EVERY
-                debounced = time.time() - last_shot >= MIN_SHOT_GAP
                 if due or (changed and debounced):
                     last_shot = time.time()
                     _snapshot(con, now, app, title)

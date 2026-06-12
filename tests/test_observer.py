@@ -292,3 +292,59 @@ def test_prune_size_cap_inactive_under_budget(tmp_path, monkeypatch):
     observer._prune(con, now)
     con.close()
     assert (shot_dir / name).exists()
+
+
+def test_should_ocr_skips_identical_frames():
+    from assistant import observer
+
+    a = observer._img_hash(b"frame-bytes-A")
+    b = observer._img_hash(b"frame-bytes-B")
+    # Identical image bytes -> same hash -> skip OCR (the text-hash dedupe would
+    # have discarded the result anyway, so no captured data is lost).
+    assert observer._should_ocr(a, a) is False
+    # Different bytes -> different hash -> OCR must run.
+    assert observer._should_ocr(b, a) is True
+    # No hash (read failed) -> don't claim a frame is worth OCR'ing.
+    assert observer._should_ocr("", a) is False
+
+
+def test_frontmost_app_falls_back_to_osascript(monkeypatch):
+    from assistant import observer
+
+    # NSWorkspace unavailable (no AppKit / headless): _frontmost_app returns "".
+    monkeypatch.setattr(observer, "_frontmost_app", lambda: "")
+
+    calls = {"n": 0}
+
+    class _Result:
+        stdout = "Code\nmain.py\n"
+
+    def fake_run(cmd, *a, **kw):
+        # Only the osascript fallback should reach subprocess here.
+        assert cmd[0] == "osascript"
+        calls["n"] += 1
+        return _Result()
+
+    monkeypatch.setattr(observer.subprocess, "run", fake_run)
+    app, title = observer._frontmost()
+    assert (app, title) == ("Code", "main.py")
+    assert calls["n"] == 1                # the osascript path was used
+
+
+def test_frontmost_app_native_degrades_when_appkit_raises(monkeypatch):
+    from assistant import observer
+
+    # Simulate NSWorkspace blowing up (no AppKit / no GUI session): the native
+    # helper must swallow it and return "", which is the loop's signal to fall
+    # back to the osascript _frontmost path that still yields (app, title).
+    import builtins
+
+    real_import = builtins.__import__
+
+    def boom(name, *a, **kw):
+        if name == "AppKit":
+            raise ImportError("no AppKit in this environment")
+        return real_import(name, *a, **kw)
+
+    monkeypatch.setattr(builtins, "__import__", boom)
+    assert observer._frontmost_app() == ""

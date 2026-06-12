@@ -188,3 +188,32 @@ def test_rename_conversation_sets_title(monkeypatch):
     assert history.get(cid)["title"] == "Cardio block"
     assert bridge.rename_conversation(cid, "   ") == "empty"
     assert history.get(cid)["title"] == "Cardio block"   # unchanged on empty
+
+
+def test_proactive_bridge_methods(monkeypatch):
+    from assistant.proactive import store
+    from assistant.proactive.core import Insight
+
+    bridge, _ = _make_bridge(monkeypatch)
+    store.add(Insight(key="x", category="tasks", title="Do the thing",
+                      action_prompt="Help me do the thing", urgency="feed"))
+    feed = bridge.proactive_feed()
+    assert feed and feed[0]["title"] == "Do the thing"
+    assert bridge.proactive_unread() == 1
+
+    fid = feed[0]["id"]
+    # act returns the prompt for JS to submit, and marks the item done
+    assert bridge.proactive_act(fid) == "Help me do the thing"
+    assert bridge.proactive_feed() == []          # done item leaves the feed
+
+    store.add(Insight(key="y", category="tasks", title="Another", urgency="feed"))
+    fid2 = bridge.proactive_feed()[0]["id"]
+    bridge.proactive_snooze(fid2, 2)
+    assert bridge.proactive_feed() == []          # snoozed hidden
+    bridge.proactive_mark_seen()
+    assert bridge.proactive_unread() == 0
+
+
+def test_proactive_act_missing_item_returns_empty(monkeypatch):
+    bridge, _ = _make_bridge(monkeypatch)
+    assert bridge.proactive_act(99999) == ""

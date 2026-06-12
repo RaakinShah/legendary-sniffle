@@ -7,7 +7,7 @@ import sqlite3
 from contextlib import closing
 from dataclasses import dataclass
 
-from . import config
+from . import config, db
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS tasks (
@@ -49,21 +49,7 @@ class Task:
 
 def _conn() -> sqlite3.Connection:
     config.ensure_dirs()
-    conn = sqlite3.connect(config.DB_PATH)
-    conn.row_factory = sqlite3.Row
-    # WAL lets the GUI read tasks while a scheduled job writes them, without
-    # blocking; NORMAL sync is the safe, fast pairing for WAL.
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    # Writers can still collide briefly; wait out the lock instead of raising
-    # "database is locked" immediately.
-    conn.execute("PRAGMA busy_timeout=5000")
-    conn.execute(_SCHEMA)
-    # Migration anchor for future schema changes. v1 is fully described by the
-    # additive CREATE IF NOT EXISTS schema above.
-    if conn.execute("PRAGMA user_version").fetchone()[0] == 0:
-        conn.execute("PRAGMA user_version=1")
-    return conn
+    return db.open_db(config.DB_PATH, lambda c: c.execute(_SCHEMA))
 
 
 def add(title: str, due: str | None = None, notes: str = "", priority: str = "normal") -> Task:

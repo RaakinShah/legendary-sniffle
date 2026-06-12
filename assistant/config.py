@@ -170,6 +170,12 @@ ESCALATE_MODEL_MAX = os.environ.get("ASSISTANT_ESCALATE_MODEL_MAX", "claude-opus
 ESCALATE_EFFORT = os.environ.get("ASSISTANT_ESCALATE_EFFORT", "high").strip()
 
 
+# Release the warm GUI engine (and its bundled `claude` subprocess, ~150 MB)
+# after this many idle minutes; it re-warms lazily on the next message. 0 keeps
+# it resident for the whole session (snappier first reply, more idle RAM).
+IDLE_RELEASE_MINUTES = _int_env("ASSISTANT_IDLE_RELEASE_MIN", 10, 0, 240)
+
+
 def escalation_available() -> bool:
     """True when think_harder / auto-escalation can reach a stronger Claude model:
     enabled and with usable Claude credentials present. Backend-agnostic — the

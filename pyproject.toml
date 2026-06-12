@@ -29,7 +29,7 @@ assistant-doctor = "assistant.doctor:run"
 assistant-briefing = "assistant.briefing:run"
 assistant-insights = "assistant.insights:run"
 assistant-consolidate = "assistant.consolidate:run"
-assistant-watch = "assistant.watch:run"
+assistant-proactive = "assistant.proactive.run:run"
 
 [tool.setuptools.packages.find]
 include = ["assistant*"]
