@@ -17,14 +17,13 @@ PROMPT_TEMPLATE = """Run my end-of-day distillation for {date}.
 1. Pull today's activity with recall_timeline (since_hours=18). Where an entry looks \
 significant but vague, use recall_search to fill in specifics.
 2. Distill what matters into long-term memory:
-   - new/updated projects or commitments -> projects.md (Edit/Write)
    - durable personal facts or preferences you learned -> remember tool
    - a 3-6 line summary of the day -> journal tool
    File, don't hoard: skip routine noise (brief app switches, idle time).
 3. Check list_tasks: if today's activity shows something was finished, complete it; \
 if activity revealed a new obligation (a promised reply, a form to submit), add it.
 
-Then write a short evening digest to {path} with the Write tool:
+Then write a short evening digest to the file {path} (use the write_file tool):
 # Evening digest — {date}
 - **What happened** (3-5 bullets, from the timeline)
 - **Loose ends** (things started but unfinished, with where they live)

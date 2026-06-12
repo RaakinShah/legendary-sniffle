@@ -12,3 +12,6 @@ mcp_servers.json
 
 # Local assistant data (lives in ~/.assistant by default, but just in case)
 .assistant/
+
+# macOS Finder junk
+.DS_Store

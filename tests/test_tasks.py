@@ -56,3 +56,21 @@ def test_due_soon_includes_overdue_and_window():
 
     titles = [t.title for t in tasks.due_soon(within_hours=24)]
     assert titles == ["overdue", "soon"]
+
+
+def test_user_version_is_one_after_connect():
+    from contextlib import closing
+
+    from assistant import tasks
+
+    with closing(tasks._conn()) as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+
+
+def test_busy_timeout_configured():
+    from contextlib import closing
+
+    from assistant import tasks
+
+    with closing(tasks._conn()) as conn:
+        assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 5000

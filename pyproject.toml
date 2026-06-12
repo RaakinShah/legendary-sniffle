@@ -5,25 +5,31 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "personal-assistant"
 version = "0.1.0"
-description = "A deeply integrated personal assistant built on the Claude Agent SDK"
+description = "A deeply integrated personal assistant — Claude brain by default, local Ollama optional"
 requires-python = ">=3.10"
+# Upper bounds keep a breaking minor release from silently breaking the app;
+# bump them deliberately after testing.
 dependencies = [
-    "claude-agent-sdk>=0.1.0",
+    "httpx>=0.27,<1",               # Ollama client + web tools
+    "claude-agent-sdk>=0.1.0,<0.2", # default Claude backend
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
 gui = [
-    "pywebview>=5.0",
-    "pynput>=1.7",
+    "pywebview>=5.0,<7",
+    "pynput>=1.7,<2",
     "pyobjc-framework-Vision>=10; sys_platform == 'darwin'",
 ]
 
 [project.scripts]
 assistant = "assistant.cli:run"
 assistant-gui = "assistant.gui:run"
+assistant-doctor = "assistant.doctor:run"
 assistant-briefing = "assistant.briefing:run"
 assistant-insights = "assistant.insights:run"
+assistant-consolidate = "assistant.consolidate:run"
+assistant-watch = "assistant.watch:run"
 
 [tool.setuptools.packages.find]
 include = ["assistant*"]
