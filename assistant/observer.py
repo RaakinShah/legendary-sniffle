@@ -403,6 +403,26 @@ def _lower_thread_qos() -> None:
         log.debug("could not lower observer thread QoS: %s", exc)
 
 
+def _autorelease_pool():
+    """A per-iteration ObjC autorelease pool for the observer thread.
+
+    This thread is a plain Python thread, not AppKit's main thread, so it has no
+    run loop draining an autorelease pool. Without one, every autoreleased object
+    that Vision OCR (VNRecognizeTextRequest results, recognized strings) and the
+    Quartz capture create lives until the process exits — a relentless heap leak
+    (observed: ~8 GB after a few hours). Draining a pool each tick frees them.
+    Degrades to a no-op on non-mac / very old pyobjc."""
+    try:
+        import objc
+        ap = getattr(objc, "autorelease_pool", None)
+        if ap is not None:
+            return ap()
+    except Exception:  # noqa: BLE001
+        pass
+    from contextlib import nullcontext
+    return nullcontext()
+
+
 def _loop() -> None:
     global _latest
     _lower_thread_qos()              # runs on the observer thread: lowers its own QoS
@@ -414,68 +434,71 @@ def _loop() -> None:
     cur_title = ""                   # last window title read via osascript
     con = _conn()
     while True:
-        try:
-            if paused:
-                time.sleep(OBSERVE_EVERY)
-                continue
-            now = dt.datetime.now()
-            # Cheap 5s tick: app name via NSWorkspace, no fork. NSWorkspace gives
-            # the app but not the window title, so we reuse the last title read
-            # and refresh it (via the osascript path) only at the shot beat below.
-            native = True
-            app = _frontmost_app()
-            title = cur_title
-            if not app:                          # no AppKit: fall back, gets title too
-                native = False
-                app, title = _frontmost()
-                cur_title = title
-            # Shot timing. App switches are still caught every tick (the native
-            # app name is fresh); title switches surface at the shot beat. Only
-            # refresh the title via osascript when a shot will actually fire, so
-            # the per-tick osascript fork is gone.
-            due = time.time() - last_shot >= SHOT_EVERY
-            debounced = time.time() - last_shot >= MIN_SHOT_GAP
-            app_changed = prev_app is not None and app != prev_app
-            prev_app = app
-            will_shot = bool(app) and (due or (app_changed and debounced))
-            if will_shot and native:
-                fa, ft = _frontmost()            # one osascript only at shot cadence
-                if fa:
-                    app, title = fa, ft
-                cur_title = title
-            if app and not _is_private(app, title):
-                _latest = (app, title, time.monotonic())   # keep ambient context warm
-                con.execute(
-                    "INSERT INTO activity VALUES (?,?,?)",
-                    (now.isoformat(timespec="seconds"), app, title),
-                )
-                con.commit()
-                key = (app, title)
-                changed = prev_key is not None and key != prev_key
-                prev_key = key
-                if due or (changed and debounced):
-                    last_shot = time.time()
-                    _snapshot(con, now, app, title)
-                if time.time() - last_prune >= 1800:
-                    last_prune = time.time()
-                    _prune(con, now)
-                digest_every = config.RECALL_DIGEST_MINUTES * 60
-                if digest_every and time.time() - last_digest >= digest_every:
-                    last_digest = time.time()
-                    _make_digest(con, now)
-        except Exception:
-            # Survive errors instead of dying silently. If the connection went
-            # bad (disk full, sleep/wake, locked), drop it and reconnect so the
-            # thread keeps recording instead of writing to a dead handle.
-            log.exception("recall observer loop error; reconnecting")
+        # Drain ObjC autoreleased objects every tick — otherwise Vision OCR and
+        # the Quartz capture leak relentlessly on this non-main thread.
+        with _autorelease_pool():
             try:
-                con.close()
-            except Exception:  # noqa: BLE001
-                pass
-            try:
-                con = _conn()
-            except Exception:  # noqa: BLE001 - try again next tick
-                log.exception("recall observer could not reconnect")
+                if paused:
+                    time.sleep(OBSERVE_EVERY)
+                    continue
+                now = dt.datetime.now()
+                # Cheap 5s tick: app name via NSWorkspace, no fork. NSWorkspace gives
+                # the app but not the window title, so we reuse the last title read
+                # and refresh it (via the osascript path) only at the shot beat below.
+                native = True
+                app = _frontmost_app()
+                title = cur_title
+                if not app:                          # no AppKit: fall back, gets title too
+                    native = False
+                    app, title = _frontmost()
+                    cur_title = title
+                # Shot timing. App switches are still caught every tick (the native
+                # app name is fresh); title switches surface at the shot beat. Only
+                # refresh the title via osascript when a shot will actually fire, so
+                # the per-tick osascript fork is gone.
+                due = time.time() - last_shot >= SHOT_EVERY
+                debounced = time.time() - last_shot >= MIN_SHOT_GAP
+                app_changed = prev_app is not None and app != prev_app
+                prev_app = app
+                will_shot = bool(app) and (due or (app_changed and debounced))
+                if will_shot and native:
+                    fa, ft = _frontmost()            # one osascript only at shot cadence
+                    if fa:
+                        app, title = fa, ft
+                    cur_title = title
+                if app and not _is_private(app, title):
+                    _latest = (app, title, time.monotonic())   # keep ambient context warm
+                    con.execute(
+                        "INSERT INTO activity VALUES (?,?,?)",
+                        (now.isoformat(timespec="seconds"), app, title),
+                    )
+                    con.commit()
+                    key = (app, title)
+                    changed = prev_key is not None and key != prev_key
+                    prev_key = key
+                    if due or (changed and debounced):
+                        last_shot = time.time()
+                        _snapshot(con, now, app, title)
+                    if time.time() - last_prune >= 1800:
+                        last_prune = time.time()
+                        _prune(con, now)
+                    digest_every = config.RECALL_DIGEST_MINUTES * 60
+                    if digest_every and time.time() - last_digest >= digest_every:
+                        last_digest = time.time()
+                        _make_digest(con, now)
+            except Exception:
+                # Survive errors instead of dying silently. If the connection went
+                # bad (disk full, sleep/wake, locked), drop it and reconnect so the
+                # thread keeps recording instead of writing to a dead handle.
+                log.exception("recall observer loop error; reconnecting")
+                try:
+                    con.close()
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    con = _conn()
+                except Exception:  # noqa: BLE001 - try again next tick
+                    log.exception("recall observer could not reconnect")
         time.sleep(OBSERVE_EVERY)
 
 
