@@ -27,8 +27,8 @@ Then write a brief, scannable markdown briefing with sections only when they hav
 - **Inbox highlights** (if connected)
 - **A suggestion** — one proactive, genuinely useful idea for the day
 
-Save it with the Write tool to {path}, then also output the full briefing text as your \
-final message."""
+Save it to the file {path} (use the write_file tool), then also output the full briefing \
+text as your final message."""
 
 
 async def main() -> None:

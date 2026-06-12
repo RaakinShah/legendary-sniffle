@@ -12,4 +12,10 @@ def isolated_home(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "BRIEFINGS_DIR", tmp_path / "briefings")
     monkeypatch.setattr(config, "INSIGHTS_DIR", tmp_path / "insights")
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "assistant.db")
+    # Hermetic by default: never let auto-rescue / ask_advisor / think_harder /
+    # auto-escalation reach the real Claude API during tests (this machine has
+    # stored Claude creds, which would otherwise make advisor_available() and
+    # escalation_available() true). Tests that need them opt back in.
+    monkeypatch.setattr(config, "ADVISOR", False)
+    monkeypatch.setattr(config, "ESCALATE", False)
     yield

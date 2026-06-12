@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 
 from . import config
@@ -50,12 +51,23 @@ def _conn() -> sqlite3.Connection:
     config.ensure_dirs()
     conn = sqlite3.connect(config.DB_PATH)
     conn.row_factory = sqlite3.Row
+    # WAL lets the GUI read tasks while a scheduled job writes them, without
+    # blocking; NORMAL sync is the safe, fast pairing for WAL.
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    # Writers can still collide briefly; wait out the lock instead of raising
+    # "database is locked" immediately.
+    conn.execute("PRAGMA busy_timeout=5000")
     conn.execute(_SCHEMA)
+    # Migration anchor for future schema changes. v1 is fully described by the
+    # additive CREATE IF NOT EXISTS schema above.
+    if conn.execute("PRAGMA user_version").fetchone()[0] == 0:
+        conn.execute("PRAGMA user_version=1")
     return conn
 
 
 def add(title: str, due: str | None = None, notes: str = "", priority: str = "normal") -> Task:
-    with _conn() as conn:
+    with closing(_conn()) as conn, conn:
         cur = conn.execute(
             "INSERT INTO tasks (title, notes, due, priority, created_at) VALUES (?, ?, ?, ?, ?)",
             (title, notes, due, priority, dt.datetime.now().isoformat(timespec="seconds")),
@@ -84,12 +96,12 @@ def list_tasks(status: str = "open") -> list[Task]:
         query += " WHERE status = ?"
         params = (status,)
     query += " ORDER BY due IS NULL, due, priority = 'high' DESC, id"
-    with _conn() as conn:
+    with closing(_conn()) as conn, conn:
         return [Task(**dict(r)) for r in conn.execute(query, params).fetchall()]
 
 
 def complete(task_id: int) -> Task:
-    with _conn() as conn:
+    with closing(_conn()) as conn, conn:
         conn.execute(
             "UPDATE tasks SET status = 'done', completed_at = ? WHERE id = ? AND status != 'done'",
             (dt.datetime.now().isoformat(timespec="seconds"), task_id),
@@ -99,7 +111,7 @@ def complete(task_id: int) -> Task:
 
 
 def delete(task_id: int) -> None:
-    with _conn() as conn:
+    with closing(_conn()) as conn, conn:
         cur = conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
         if cur.rowcount == 0:
             raise KeyError(f"No task with id {task_id}")
@@ -108,7 +120,7 @@ def delete(task_id: int) -> None:
 def due_soon(within_hours: int = 24) -> list[Task]:
     """Open tasks that are overdue or due within the window."""
     horizon = (dt.datetime.now() + dt.timedelta(hours=within_hours)).isoformat(timespec="seconds")
-    with _conn() as conn:
+    with closing(_conn()) as conn, conn:
         rows = conn.execute(
             "SELECT * FROM tasks WHERE status = 'open' AND due IS NOT NULL AND due <= ? "
             "ORDER BY due",
