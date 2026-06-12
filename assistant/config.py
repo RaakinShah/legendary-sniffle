@@ -216,6 +216,11 @@ def escalation_available() -> bool:
 # ASSISTANT_HOME + ASSISTANT_ALLOWED_DIRS with edit confirmation.
 FULL_ACCESS = os.environ.get("ASSISTANT_FULL_ACCESS", "1") != "0"
 
+# Use the Gmail/Calendar connectors already authorized on the user's Claude
+# account (read-only) — gives Aide mail/calendar access with zero Google OAuth
+# setup, on the Claude backend. Set ASSISTANT_ACCOUNT_CONNECTORS=0 to disable.
+ACCOUNT_CONNECTORS = os.environ.get("ASSISTANT_ACCOUNT_CONNECTORS", "1") != "0"
+
 # Global ⌥Space hotkey (pynput). OFF by default: on macOS 14+/26, pynput's
 # listener thread calls the Text Services Manager off the main thread, which the
 # OS now aborts (SIGTRAP) — it crashes the whole app. Opt in with ASSISTANT_HOTKEY=1

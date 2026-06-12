@@ -457,6 +457,22 @@ def build_options(
         mcp_servers[name] = spec
         allowed.append(f"mcp__{name}__*")
 
+    # Claude-account connectors: Gmail/Calendar authorized on the user's Claude
+    # account flow into the SDK subprocess automatically, so allow them and Aide
+    # reads mail/calendar with NO separate Google OAuth setup. READ-ONLY only —
+    # never the draft/label/organize/event-write tools, per the user's rule that
+    # Aide must not organize or write into Gmail/Calendar. Harmless if a connector
+    # isn't authorized: the tool simply won't exist.
+    if config.ACCOUNT_CONNECTORS:
+        allowed += [
+            "mcp__claude_ai_Gmail__search_threads",
+            "mcp__claude_ai_Gmail__get_thread",
+            "mcp__claude_ai_Gmail__list_labels",
+            "mcp__claude_ai_Google_Calendar__list_events",
+            "mcp__claude_ai_Google_Calendar__list_calendars",
+            "mcp__claude_ai_Google_Calendar__get_event",
+        ]
+
     dirs = config.allowed_dirs()
     if config.FULL_ACCESS:
         dirs = [str(Path.home())] + dirs
