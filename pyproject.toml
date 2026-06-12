@@ -16,6 +16,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+# On-device Apple Foundation model backend (ASSISTANT_BACKEND=apple); macOS 26+
+# with Apple Intelligence enabled. The OS owns the weights, so nothing heavy is
+# pulled into the app process.
+apple = ["apple-fm-sdk>=0.2,<1; sys_platform == 'darwin'"]
 gui = [
     "pywebview>=5.0,<7",
     "pynput>=1.7,<2",
@@ -29,7 +33,7 @@ assistant-doctor = "assistant.doctor:run"
 assistant-briefing = "assistant.briefing:run"
 assistant-insights = "assistant.insights:run"
 assistant-consolidate = "assistant.consolidate:run"
-assistant-watch = "assistant.watch:run"
+assistant-proactive = "assistant.proactive.run:run"
 
 [tool.setuptools.packages.find]
 include = ["assistant*"]

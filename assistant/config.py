@@ -96,10 +96,19 @@ EFFORT = os.environ.get("ASSISTANT_EFFORT", "high")
 #                        small model hallucinates, so it's opt-in, not the default.
 # Both share the same tools, memory, tasks, and recall; only the engine differs.
 BACKEND = os.environ.get("ASSISTANT_BACKEND", "claude").strip().lower()
-if BACKEND not in ("claude", "ollama"):
-    print(f"warning: ASSISTANT_BACKEND={BACKEND!r} is not 'claude' or 'ollama'; "
+# "apple" = the on-device Apple Foundation model (macOS 26+, Apple Intelligence).
+BACKEND = {"foundation": "apple", "fm": "apple", "apple-fm": "apple"}.get(BACKEND, BACKEND)
+if BACKEND not in ("claude", "ollama", "apple"):
+    print(f"warning: ASSISTANT_BACKEND={BACKEND!r} is not 'claude', 'ollama', or 'apple'; "
           "using 'claude'", file=sys.stderr)
     BACKEND = "claude"
+
+# Opt the apple backend into Apple's Private Cloud Compute model — far more
+# capable (Light/Moderate/Deep reasoning, 32K context, broad knowledge), still
+# free, private, and key-less. It fronts the same LanguageModelSession API, so
+# Aide adopts it with no code change the moment apple-fm-sdk exposes the binding;
+# until then this safely falls back to the on-device model.
+APPLE_CLOUD = os.environ.get("ASSISTANT_APPLE_CLOUD", "0").strip().lower() in ("1", "true", "on", "yes")
 
 # Local (Ollama) settings. The model must support tool calling.
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
@@ -170,6 +179,31 @@ ESCALATE_MODEL_MAX = os.environ.get("ASSISTANT_ESCALATE_MODEL_MAX", "claude-opus
 ESCALATE_EFFORT = os.environ.get("ASSISTANT_ESCALATE_EFFORT", "high").strip()
 
 
+# Release the warm GUI engine (and its bundled `claude` subprocess, ~150 MB)
+# after this many idle minutes; it re-warms lazily on the next message. 0 keeps
+# it resident for the whole session (snappier first reply, more idle RAM).
+IDLE_RELEASE_MINUTES = _int_env("ASSISTANT_IDLE_RELEASE_MIN", 10, 0, 240)
+
+
+# Focus-aware proactive silence: when one of these apps is frontmost, the
+# proactive runner holds back notification pings (the finding still lands in the
+# feed; it pings once you leave the focus app). Aimed at moments where a banner
+# is genuinely disruptive — a meeting or shared screen, presenting, or deep work
+# — not at background video (his normal study state). Case-insensitive substring
+# match on the frontmost app name. Override the whole list with
+# ASSISTANT_FOCUS_APPS (comma-separated); set it empty to disable the silence.
+_FOCUS_DEFAULT = (
+    "zoom.us,Zoom,Microsoft Teams,Webex,Google Meet,Around,"   # meetings / shared screen
+    "Keynote,Microsoft PowerPoint,"                              # presenting
+    "Xcode,Terminal,iTerm2"                                      # deep work / long builds
+)
+FOCUS_APPS = frozenset(
+    x.strip().lower()
+    for x in os.environ.get("ASSISTANT_FOCUS_APPS", _FOCUS_DEFAULT).split(",")
+    if x.strip()
+)
+
+
 def escalation_available() -> bool:
     """True when think_harder / auto-escalation can reach a stronger Claude model:
     enabled and with usable Claude credentials present. Backend-agnostic — the
@@ -181,6 +215,11 @@ def escalation_available() -> bool:
 # without per-action approval. Set ASSISTANT_FULL_ACCESS=0 to sandbox it back to
 # ASSISTANT_HOME + ASSISTANT_ALLOWED_DIRS with edit confirmation.
 FULL_ACCESS = os.environ.get("ASSISTANT_FULL_ACCESS", "1") != "0"
+
+# Use the Gmail/Calendar connectors already authorized on the user's Claude
+# account (read-only) — gives Aide mail/calendar access with zero Google OAuth
+# setup, on the Claude backend. Set ASSISTANT_ACCOUNT_CONNECTORS=0 to disable.
+ACCOUNT_CONNECTORS = os.environ.get("ASSISTANT_ACCOUNT_CONNECTORS", "1") != "0"
 
 # Global ⌥Space hotkey (pynput). OFF by default: on macOS 14+/26, pynput's
 # listener thread calls the Text Services Manager off the main thread, which the
@@ -255,6 +294,23 @@ def auth_available() -> bool:
     return cfg.is_file() and "oauthAccount" in cfg.read_text()
 
 
+def connectors_available() -> bool:
+    """True if read-only calendar/email tools are reachable this run: either an
+    external gcal/gmail MCP server is configured, or the Claude account
+    connectors are enabled. Either way auth must be present to spend an engine
+    turn. Proactive calendar/email checks gate on this so they don't silently
+    no-op when the connectors moved from mcp_servers.json to the Claude account."""
+    if not auth_available():
+        return False
+    if ACCOUNT_CONNECTORS:
+        return True
+    try:
+        servers = load_external_mcp_servers()
+    except Exception:  # noqa: BLE001 - unreadable config means no external connector
+        return False
+    return bool({"gmail", "gcal"} & set(servers))
+
+
 def ollama_tags() -> tuple[bool, list[str], str]:
     """One probe of the Ollama server: (reachable, installed model names, error).
     Shared by ollama_ready() and the doctor so the server is hit once, not twice."""
@@ -283,10 +339,28 @@ def ollama_ready() -> tuple[bool, str]:
     return False, f"model {OLLAMA_MODEL} not installed (run: ollama pull {OLLAMA_MODEL})"
 
 
+def apple_ready() -> tuple[bool, str]:
+    """Whether the Apple on-device Foundation model can run here."""
+    if sys.platform != "darwin":
+        return False, "the Apple backend needs macOS 26+ on Apple silicon"
+    try:
+        import apple_fm_sdk as fm
+    except ImportError:
+        return False, "apple-fm-sdk not installed (pip install apple-fm-sdk)"
+    try:
+        ok, reason = fm.SystemLanguageModel().is_available()
+    except Exception as exc:  # noqa: BLE001
+        return False, f"Apple Foundation model error: {exc}"
+    return (True, "Apple on-device model ready") if ok else \
+        (False, f"Apple Intelligence unavailable: {reason or 'enable it in System Settings'}")
+
+
 def backend_ready() -> tuple[bool, str]:
     """Whether the configured backend can actually run. (ok, human-readable detail)."""
     if BACKEND == "claude":
         return (True, "Claude credentials present") if auth_available() else (False, AUTH_HELP)
+    if BACKEND == "apple":
+        return apple_ready()
     return ollama_ready()
 
 

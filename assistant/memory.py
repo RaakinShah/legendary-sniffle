@@ -11,8 +11,30 @@ Layout under ~/.assistant/memory/:
 from __future__ import annotations
 
 import datetime as dt
+import os
+import tempfile
 
 from . import config
+
+
+def _atomic_write(path: "config.Path", text: str) -> None:
+    """Write `text` to `path` atomically. A crash or power loss mid-write leaves
+    either the intact old file or the complete new one, never a truncated mix.
+    The temp file is created in the same directory so os.replace is a true atomic
+    rename (no cross-filesystem copy)."""
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 SEED_FILES = {
     "profile.md": "# Profile\n\n(The assistant fills this in as it learns about you.)\n",
@@ -88,7 +110,7 @@ def update(category: str, find: str, replace: str) -> str:
     if n == 0:
         return (f"Nothing matching {find!r} in {path.name}. Read the file to see "
                 "its current wording, then try again with the exact text.")
-    path.write_text(text.replace(find, replace))
+    _atomic_write(path, text.replace(find, replace))
     return f"Updated {path.name}: replaced {n} occurrence{'s' if n > 1 else ''}."
 
 
@@ -107,7 +129,7 @@ def forget_fact(category: str, text: str) -> str:
     removed = len(lines) - len(kept)
     if not removed:
         return f"Nothing matching {text!r} in {path.name}."
-    path.write_text("\n".join(kept) + "\n")
+    _atomic_write(path, "\n".join(kept) + "\n")
     return f"Forgot {removed} {'entries' if removed > 1 else 'entry'} from {path.name}."
 
 

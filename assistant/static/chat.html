@@ -345,6 +345,21 @@
   #top .ctl.off { color: var(--warn-text); }
   #top .ctl.off .slash { display: inline !important; }
 
+  /* Panel-header controls (context + feed). Without this they fall back to the
+     browser's default button box with an unsized, invisible icon — they read as
+     empty buttons. Match the top-bar controls; the close reads as a red X. */
+  .ctxHead .ctl, .feedHead .ctl {
+    width: 28px; height: 28px; border: none; border-radius: var(--r-md);
+    background: transparent; color: var(--text-2); cursor: pointer;
+    display: grid; place-items: center;
+    transition: background .14s var(--ease), color .14s var(--ease);
+  }
+  .ctxHead .ctl:hover, .feedHead .ctl:hover { background: var(--fill); color: var(--text); }
+  .ctxHead .ctl:focus-visible, .feedHead .ctl:focus-visible { box-shadow: 0 0 0 2px var(--accent-ring); }
+  .ctxHead .ctl svg, .feedHead .ctl svg { width: 16px; height: 16px; stroke: currentColor; }
+  #ctxClose, #feedClose { color: var(--danger); }
+  #ctxClose:hover, #feedClose:hover { background: var(--danger-bg); color: var(--danger); }
+
   #log {
     flex: 1; overflow-y: auto; padding: var(--s2) var(--s7) var(--s5);
     scroll-behavior: smooth;
@@ -694,6 +709,124 @@
   }
   .ctxFoot .sp { flex: 1; }
 
+  /* ============================================================
+     PROACTIVE FEED — items that need the user's attention.
+     Same overlay/scrim/spring/escape contract as the context panel,
+     so it reads as the same surface. Flat, crisp, no glow.
+     ============================================================ */
+  #feedOverlay {
+    position: fixed; inset: 0; z-index: 50;
+    background: rgba(0,0,0,.32);
+    display: flex; align-items: center; justify-content: center;
+  }
+  #feedOverlay[hidden] { display: none; }
+  #feedPanel {
+    width: min(560px, calc(100% - 48px));
+    max-height: min(76vh, 760px);
+    display: flex; flex-direction: column;
+    background: var(--elevated);
+    border: 1px solid var(--hairline); border-radius: var(--r-lg);
+    box-shadow: var(--shadow-pop);
+    animation: rise .3s var(--spring) both;
+  }
+  .feedHead {
+    flex: none; display: flex; align-items: center; gap: var(--s2);
+    padding: var(--s3) var(--s3) var(--s3) var(--s4);
+    border-bottom: 1px solid var(--hairline-2);
+    font-weight: 600; font-size: calc(14px * var(--fs, 1));
+  }
+  .feedHead .sp { flex: 1; }
+  .feedBody { overflow-y: auto; padding: var(--s3) var(--s4) var(--s4); }
+  .feedBody::-webkit-scrollbar { width: 8px; }
+  .feedBody::-webkit-scrollbar-thumb {
+    background: var(--fill-hover); border-radius: 6px;
+    border: 2px solid transparent; background-clip: padding-box;
+  }
+  .feedEmpty {
+    color: var(--text-3); font-size: calc(13.5px * var(--fs, 1));
+    text-align: center; padding: var(--s7) var(--s2) var(--s8);
+  }
+
+  /* one feed card */
+  .feedCard {
+    position: relative; margin-bottom: var(--s3);
+    padding: var(--s3) var(--s4);
+    background: var(--surface-2); border: 1px solid var(--hairline-2);
+    border-radius: var(--r-md);
+    animation: rise .32s var(--spring) both;
+  }
+  .feedCard:last-child { margin-bottom: 0; }
+  /* notify-urgency: a flat left rule in the accent (or danger for system). No glow. */
+  .feedCard.notify { border-left: 3px solid var(--accent); padding-left: calc(var(--s4) - 2px); }
+  .feedCard.notify.system { border-left-color: var(--danger); }
+
+  .feedCard .chip {
+    display: inline-flex; align-items: center; height: 20px; padding: 0 9px;
+    border-radius: 999px; font-size: calc(10.5px * var(--fs, 1)); font-weight: 600;
+    letter-spacing: .03em; text-transform: uppercase;
+    color: var(--text-2); background: var(--fill); border: 1px solid var(--hairline-2);
+    cursor: default;
+  }
+  .feedCard.notify .chip { color: var(--accent); border-color: var(--accent-soft); background: var(--accent-soft); }
+  .feedCard.notify.system .chip { color: var(--danger); border-color: var(--danger-bd); background: var(--danger-bg); }
+
+  .feedCard .fTitle {
+    margin: var(--s2) 0 4px; font-size: calc(14px * var(--fs, 1)); font-weight: 600;
+    color: var(--text); letter-spacing: -0.01em; -webkit-user-select: text;
+  }
+  .feedCard .fBody {
+    font-size: calc(13px * var(--fs, 1)); line-height: 1.5; color: var(--text-2);
+    white-space: pre-wrap; word-wrap: break-word; -webkit-user-select: text;
+  }
+  .feedCard .fWhy {
+    margin-top: 6px; font-size: calc(11.5px * var(--fs, 1)); color: var(--text-3);
+    -webkit-user-select: text;
+  }
+
+  .feedActions {
+    display: flex; align-items: center; gap: var(--s2);
+    margin-top: var(--s3);
+  }
+  .feedActions .sp { flex: 1; }
+
+  /* primary "Do it" — solid mono, mirrors the send button's resting state */
+  .feedAct {
+    border: 1px solid var(--hairline); background: transparent; color: var(--text-2);
+    cursor: pointer; font: inherit; font-size: calc(12px * var(--fs, 1)); font-weight: 500;
+    height: 28px; padding: 0 11px; border-radius: var(--r-sm);
+    display: inline-flex; align-items: center; gap: 5px;
+    transition: background .14s var(--ease), color .14s var(--ease), border-color .14s var(--ease);
+  }
+  .feedAct:hover { background: var(--fill); color: var(--text); }
+  .feedAct:focus-visible { box-shadow: 0 0 0 2px var(--accent-ring); }
+  .feedAct.primary {
+    background: var(--btn); color: var(--btn-fg); border-color: var(--btn); font-weight: 600;
+  }
+  .feedAct.primary:hover { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+
+  /* thumbs — same hover-grow contract as the conversation-row star/del */
+  .feedThumb {
+    width: 26px; height: 26px; flex: none; border: 1px solid var(--hairline-2);
+    background: transparent; color: var(--text-3); cursor: pointer;
+    border-radius: var(--r-sm); display: grid; place-items: center;
+    transition: background .14s var(--ease), color .14s var(--ease), border-color .14s var(--ease), transform .18s var(--spring);
+  }
+  .feedThumb:hover { background: var(--fill); color: var(--text); transform: scale(1.06); }
+  .feedThumb:focus-visible { box-shadow: 0 0 0 2px var(--accent-ring); }
+  .feedThumb.on { color: var(--accent); border-color: var(--accent-soft); }
+  .feedThumb.down.on { color: var(--warn-text); border-color: var(--hairline); }
+  .feedThumb svg { width: 14px; height: 14px; stroke: currentColor; }
+
+  /* unread dot on the Routines nav item — flat, no glow */
+  #navRoutines .feedDot {
+    position: absolute; top: 9px; left: 24px;
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--accent); display: none;
+    box-shadow: 0 0 0 1.5px var(--surface);
+  }
+  #navRoutines .feedDot.show { display: block; }
+  :root[data-theme="dark"] #navRoutines .feedDot { box-shadow: 0 0 0 1.5px var(--surface); }
+
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
       animation-duration: .001ms !important;
@@ -745,6 +878,7 @@
       <button class="navItem" id="navRoutines" type="button">
         <svg viewBox="0 0 16 16" fill="none"><path d="M13.2 8a5.2 5.2 0 1 1-1.55-3.7M13.2 2v3.1h-3.1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Routines
+        <span class="feedDot" id="feedDot" aria-hidden="true"></span>
       </button>
       <button class="navItem" id="navContext" type="button" title="What Aide knows right now">
         <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.2" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.8v3.4l2.2 1.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" opacity="0"/><path d="M5.4 8.2c.9-1.9 4.3-1.9 5.2 0M5.4 8.2c-.5 1 .2 2.4 1.4 2.4h2.4c1.2 0 1.9-1.4 1.4-2.4M8 5.2v1.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -777,7 +911,7 @@
   <main id="main">
     <div id="top">
       <div class="sp"></div>
-      <button class="ctl" id="themeBtn" type="button" title="Appearance" aria-label="Toggle appearance"></button>
+      <button class="ctl" id="themeBtn" type="button" title="Appearance" aria-label="Toggle appearance"><svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4"/><path d="M8 2a6 6 0 0 0 0 12Z" fill="currentColor"/></svg></button>
       <button class="ctl" id="recallBtn" type="button" title="Pause ambient memory" aria-label="Pause ambient memory">
         <svg viewBox="0 0 16 16" fill="none">
           <path d="M1.6 8s2.5-4 6.4-4 6.4 4 6.4 4-2.5 4-6.4 4-6.4-4-6.4-4Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
@@ -823,6 +957,22 @@
       </div>
       <div class="ctxBody" id="ctxBody"></div>
       <div class="ctxFoot"><span id="ctxHome"></span><span class="sp"></span><span>Everything stays on this Mac</span></div>
+    </div>
+  </div>
+
+  <div id="feedOverlay" hidden>
+    <div id="feedPanel" role="dialog" aria-modal="true" aria-label="Proactive feed">
+      <div class="feedHead">
+        <span>Proactive</span>
+        <span class="sp"></span>
+        <button class="ctl" id="feedRefresh" type="button" title="Refresh" aria-label="Refresh">
+          <svg viewBox="0 0 16 16" fill="none"><path d="M13.2 8a5.2 5.2 0 1 1-1.55-3.7M13.2 2v3.1h-3.1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="ctl" id="feedClose" type="button" title="Close" aria-label="Close">
+          <svg viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="feedBody" id="feedBody"></div>
     </div>
   </div>
 
@@ -1415,7 +1565,7 @@
     if (sb.classList.contains('show')) $('searchInput').focus();
     else { $('searchInput').value = ''; refreshLists(); }
   };
-  $('navRoutines').onclick = () => submit('Show me my latest briefing and evening digest if they exist; otherwise lay out a quick plan for today.');
+  $('navRoutines').onclick = () => openFeedPanel();
   /* Debounced search: only the settled query hits sqlite, and a sequence token
      drops out-of-order responses so a stale prefix can't paint over the result. */
   let searchTimer = 0, searchSeq = 0;
@@ -1548,12 +1698,168 @@
   ctxOverlay.addEventListener('mousedown', e => { if (e.target === ctxOverlay) closeContextPanel(); });
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape' && !ctxOverlay.hidden) { e.preventDefault(); closeContextPanel(); }
+    else if (e.key === 'Escape' && !feedOverlay.hidden) { e.preventDefault(); closeFeedPanel(); }
     else if (e.key === 'Escape' && busy) { e.preventDefault(); stopTurn(); }
     else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'i') {
       e.preventDefault();
       if (ctxOverlay.hidden) openContextPanel(); else closeContextPanel();
     }
   });
+
+  /* ---------- proactive feed: items that need the user (Routines nav) ----------
+     Same overlay/scrim/escape contract as the context panel. Every bridge call is
+     guarded; a failure logs + surfaces an inline error rather than leaving a
+     half-rendered panel. No alert()/confirm() (they block the WKWebView loop). */
+  const feedOverlay = $('feedOverlay'), feedBody = $('feedBody'), feedDot = $('feedDot');
+  const THUMB_UP_SVG = '<svg viewBox="0 0 16 16" fill="none"><path d="M5 7.2 7.6 2c.9 0 1.6.8 1.4 1.7L8.6 6h3.1a1.4 1.4 0 0 1 1.4 1.7l-.9 4.2a1.6 1.6 0 0 1-1.55 1.25H5V7.2Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M5 7.2H2.8v6h2.2" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>';
+  const THUMB_DN_SVG = '<svg viewBox="0 0 16 16" fill="none"><path d="M11 8.8 8.4 14c-.9 0-1.6-.8-1.4-1.7L7.4 10H4.3a1.4 1.4 0 0 1-1.4-1.7l.9-4.2A1.6 1.6 0 0 1 5.35 2.85H11V8.8Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M11 8.8h2.2v-6H11" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>';
+
+  /* small wrapper: resolve a bridge promise, log + surface a message on failure */
+  function feedCall(fn, msg) {
+    try { return Promise.resolve(fn()).catch(e => { console.error(e); if (msg) showInlineError(msg); throw e; }); }
+    catch (e) { console.error(e); if (msg) showInlineError(msg); return Promise.reject(e); }
+  }
+
+  function feedEmptyState() {
+    feedBody.innerHTML = '';
+    const e = document.createElement('div'); e.className = 'feedEmpty';
+    e.textContent = 'Nothing needs you right now.';
+    feedBody.appendChild(e);
+  }
+
+  function feedCardEl(item) {
+    const card = document.createElement('div');
+    card.className = 'feedCard';
+    if (item.urgency === 'notify') card.classList.add('notify');
+    if ((item.category || '').toLowerCase() === 'system') card.classList.add('system');
+
+    const chip = document.createElement('span'); chip.className = 'chip';
+    chip.textContent = item.category || 'note';
+    card.appendChild(chip);
+
+    if (item.title) {
+      const t = document.createElement('div'); t.className = 'fTitle';
+      t.textContent = item.title; card.appendChild(t);
+    }
+    if (item.body) {
+      const b = document.createElement('div'); b.className = 'fBody';
+      b.textContent = item.body; card.appendChild(b);   // textContent preserves newlines via pre-wrap
+    }
+    if (item.source) {
+      const w = document.createElement('div'); w.className = 'fWhy';
+      w.textContent = item.source; card.appendChild(w);
+    }
+
+    const actions = document.createElement('div'); actions.className = 'feedActions';
+
+    /* Do it: proactive_act marks the item done and returns its suggested prompt;
+       we close the panel and run it through the normal send path so the user
+       bubble renders like any other message. */
+    const doBtn = document.createElement('button'); doBtn.type = 'button';
+    doBtn.className = 'feedAct primary'; doBtn.textContent = 'Do it';
+    doBtn.title = item.action_prompt || 'Run this';
+    doBtn.onclick = () => {
+      doBtn.disabled = true;
+      feedCall(() => pywebview.api.proactive_act(item.id), 'Could not run that action.')
+        .then(prompt => {
+          closeFeedPanel();
+          const text = (prompt || item.action_prompt || '').trim();
+          if (text) submit(text);
+        })
+        .catch(() => { doBtn.disabled = false; });
+    };
+    actions.appendChild(doBtn);
+
+    /* Snooze 3h: remove the card on success */
+    const snBtn = document.createElement('button'); snBtn.type = 'button';
+    snBtn.className = 'feedAct'; snBtn.textContent = 'Snooze 3h';
+    snBtn.title = 'Snooze for 3 hours';
+    snBtn.onclick = () => {
+      snBtn.disabled = true;
+      feedCall(() => pywebview.api.proactive_snooze(item.id, 3), 'Could not snooze that.')
+        .then(() => removeCard(card))
+        .catch(() => { snBtn.disabled = false; });
+    };
+    actions.appendChild(snBtn);
+
+    /* Dismiss: remove the card on success */
+    const dsBtn = document.createElement('button'); dsBtn.type = 'button';
+    dsBtn.className = 'feedAct'; dsBtn.textContent = 'Dismiss';
+    dsBtn.title = 'Dismiss';
+    dsBtn.onclick = () => {
+      dsBtn.disabled = true;
+      feedCall(() => pywebview.api.proactive_dismiss(item.id), 'Could not dismiss that.')
+        .then(() => removeCard(card))
+        .catch(() => { dsBtn.disabled = false; });
+    };
+    actions.appendChild(dsBtn);
+
+    const sp = document.createElement('span'); sp.className = 'sp'; actions.appendChild(sp);
+
+    /* thumbs: mark the chosen one active; the other clears. Feedback is one-way. */
+    const up = document.createElement('button'); up.type = 'button';
+    up.className = 'feedThumb up'; up.title = 'Helpful';
+    up.setAttribute('aria-label', 'Mark helpful'); up.innerHTML = THUMB_UP_SVG;
+    const dn = document.createElement('button'); dn.type = 'button';
+    dn.className = 'feedThumb down'; dn.title = 'Not helpful';
+    dn.setAttribute('aria-label', 'Mark not helpful'); dn.innerHTML = THUMB_DN_SVG;
+    const rate = good => {
+      feedCall(() => pywebview.api.proactive_feedback(item.id, good), 'Could not save feedback.')
+        .then(() => {
+          up.classList.toggle('on', good); dn.classList.toggle('on', !good);
+        })
+        .catch(() => {});
+    };
+    up.onclick = () => rate(true);
+    dn.onclick = () => rate(false);
+    actions.appendChild(up); actions.appendChild(dn);
+
+    card.appendChild(actions);
+    return card;
+  }
+
+  /* drop a card; fall back to the empty state if it was the last one */
+  function removeCard(card) {
+    card.remove();
+    if (!feedBody.querySelector('.feedCard')) feedEmptyState();
+  }
+
+  function renderFeed(items) {
+    feedBody.innerHTML = '';
+    if (!Array.isArray(items) || !items.length) { feedEmptyState(); return; }
+    items.forEach((item, i) => {
+      const card = feedCardEl(item);
+      card.style.animationDelay = (i * 0.04) + 's';
+      feedBody.appendChild(card);
+    });
+  }
+
+  /* unread dot on the Routines nav — fetched on load and after the panel closes */
+  function refreshFeedDot() {
+    feedCall(() => pywebview.api.proactive_unread())
+      .then(n => { feedDot.classList.toggle('show', Number(n) > 0); })
+      .catch(() => {});
+  }
+
+  function openFeedPanel() {
+    feedOverlay.hidden = false;
+    feedBody.innerHTML = '';
+    const loading = document.createElement('div'); loading.className = 'feedEmpty';
+    loading.textContent = 'Checking…'; feedBody.appendChild(loading);
+    /* opening clears the unread dot immediately and tells the bridge it's seen */
+    feedDot.classList.remove('show');
+    feedCall(() => pywebview.api.proactive_mark_seen()).catch(() => {});
+    feedCall(() => pywebview.api.proactive_feed(), 'Could not load your feed.')
+      .then(items => { if (!feedOverlay.hidden) renderFeed(items); })
+      .catch(() => { if (!feedOverlay.hidden) feedEmptyState(); });
+  }
+  function closeFeedPanel() {
+    feedOverlay.hidden = true; input.focus();
+    refreshFeedDot();   // an action may have changed what's pending
+  }
+  $('feedRefresh').onclick = openFeedPanel;
+  $('feedClose').onclick = closeFeedPanel;
+  feedOverlay.addEventListener('mousedown', e => { if (e.target === feedOverlay) closeFeedPanel(); });
 
   input.addEventListener('keydown', e => {
     /* Enter while busy is ignored (it must not trigger Stop, and the old path
@@ -1596,7 +1902,7 @@
     // Always land on the hero. It greets by name locally (zero latency, no
     // model call), and showWelcome() fetches context-aware chips itself; no
     // auto-greet turn runs on launch.
-    refreshLists(); showWelcome();
+    refreshLists(); showWelcome(); refreshFeedDot();
   });
 </script>
 </body>

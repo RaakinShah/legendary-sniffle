@@ -15,3 +15,6 @@ mcp_servers.json
 
 # macOS Finder junk
 .DS_Store
+
+# compiled Apple FM bridge binary (build with bridge/build.sh)
+bridge/aide-fm

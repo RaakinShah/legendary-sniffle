@@ -15,6 +15,7 @@ Pick the backend with ASSISTANT_BACKEND (see config.BACKEND for the default).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 from dataclasses import dataclass
@@ -366,6 +367,294 @@ class ClaudeEngine:
             self.client = None
 
 
+# --- Apple Foundation Models engine (on-device, macOS 26+) -------------------
+
+_FM_PY_TYPE = {"string": str, "integer": int, "number": float, "boolean": bool}
+
+# The on-device model has a tight (instructions + tool-schema) budget AND, like
+# most small models, gets confused by a large tool menu. So the Apple backend
+# runs a curated core instead of all ~23 tools: the high-frequency task/memory/
+# recall/file tools, the screen look, web search, file tagging, and crucially the
+# escalation tools so it can hand a hard turn to a stronger Claude model. Dropped
+# are the niche/destructive ones (delete_task, forget_fact, the recall controls,
+# the extra timeline/screenshot/fetch variants) — still reachable on the Claude
+# backend, and the on-device model can fall back to `bash` for the rest.
+_APPLE_CORE_TOOLS = frozenset({
+    "add_task", "list_tasks", "complete_task", "due_tasks",
+    "remember", "update_memory", "journal",
+    "recall_chats", "recall_search", "capture_screen",
+    "bash", "read_file", "write_file", "tag_file", "web_search",
+    "think_harder", "ask_advisor",
+})
+
+
+class _FMOptional:
+    """Marks a tool argument optional for the Foundation Models schema.
+
+    The SDK decides optionality with a literal `"Optional" in str(type_class)`
+    check, but on Python 3.14 both `typing.Optional[str]` and `str | None`
+    str-rep as `'str | None'` — no "Optional" — so every field would be required
+    and the model would be forced to fabricate values it wasn't given (e.g. a due
+    date for a bare "add a task"). This shim presents a Union origin so the SDK's
+    type-string mapping still unwraps to the base type, while its str carries the
+    word "Optional" so the field is correctly marked optional."""
+
+    def __init__(self, base: type) -> None:
+        import typing
+        self.__origin__ = typing.Union
+        self.__args__ = (base, type(None))
+        self._base = base
+
+    def __str__(self) -> str:
+        return f"Optional[{self._base.__name__}]"
+
+    __repr__ = __str__
+
+
+def _fm_delta(prev: str, snap: str) -> str:
+    """stream_response yields the cumulative text each step; the new Delta is just
+    the appended tail. A snapshot that doesn't extend the previous one (a rare
+    mid-turn reset) is emitted whole rather than mis-sliced."""
+    return snap[len(prev):] if snap.startswith(prev) else snap
+
+
+def _fm_schema(fm, description: str, params: dict):
+    """Map one tool's flat JSON-schema parameters to a Foundation Models
+    GenerationSchema. Aide's tool args are scalars (string/int/number/bool) plus
+    a few enums; an enum becomes a string whose description lists the choices.
+
+    A non-required field becomes Optional (via _FMOptional) so the model may omit
+    it instead of being forced to fabricate a value it was never given."""
+    from apple_fm_sdk import generation_property as gp
+
+    required = set(params.get("required", []))
+    props = []
+    for pname, pdef in (params.get("properties") or {}).items():
+        base = _FM_PY_TYPE.get(pdef.get("type", "string"), str)
+        desc = pdef.get("description", "")
+        if "enum" in pdef:
+            base = str
+            desc = f"{desc} (one of: {', '.join(str(c) for c in pdef['enum'])})".strip()
+        type_class = base if pname in required else _FMOptional(base)
+        props.append(gp.Property(name=pname, type_class=type_class, description=desc))
+    return fm.GenerationSchema(type_class=dict, description=description, properties=props)
+
+
+def _fm_loop_message(counts: dict, tname: str, raw: str, limit: int) -> str | None:
+    """Bump the per-turn call counter and, once a tool is re-issued with identical
+    arguments more than `limit` times, return a message telling the model to stop.
+    None means "go ahead and run the tool". Keeps the on-device model from spinning
+    the same call into a context-overflow crash."""
+    sig = f"{tname}:{raw}"
+    n = counts[sig] = counts.get(sig, 0) + 1
+    if n > limit:
+        return (f"You have already called {tname} with these exact arguments "
+                f"{n - 1} times and received the result each time. Do NOT call it "
+                f"again — answer the user now with what you already have.")
+    return None
+
+
+def _fm_tool(fm, engine, spec: dict, handler):
+    """Wrap one of Aide's (spec, handler) pairs as a Foundation Models Tool. The
+    SDK invokes call() automatically during generation; we surface a ToolCall on
+    the turn's event queue and run Aide's real handler with the parsed arguments."""
+    fn = spec["function"]
+    tname, tdesc = fn["name"], fn.get("description", "")
+    schema = _fm_schema(fm, tdesc, fn.get("parameters", {}))
+
+    class _AideTool(fm.Tool):
+        name = tname
+        description = tdesc
+
+        @property
+        def arguments_schema(self):
+            return schema
+
+        async def call(self, args) -> str:
+            q = engine._event_q
+            if q is not None:
+                await q.put(ToolCall(tname))
+            raw = args.to_json()
+            # Loop guard: the on-device model can get stuck re-issuing the same
+            # call forever (observed: due_tasks/list_tasks 12x until it overflowed
+            # and 255'd). Stop it after a few identical repeats.
+            stop = _fm_loop_message(engine._call_counts, tname, raw, config.ADVISOR_LOOP_LIMIT)
+            if stop is not None:
+                return stop
+            try:
+                parsed = json.loads(raw)
+            except Exception:  # noqa: BLE001 - bad args -> empty, handler defaults
+                parsed = {}
+            try:
+                return await handler(parsed or {})
+            except Exception as exc:  # noqa: BLE001 - reported back to the model
+                return f"Tool '{tname}' raised: {exc}"
+
+    return _AideTool()
+
+
+class FoundationModelsEngine:
+    """Runs the agent loop on Apple's on-device Foundation model (macOS 26+) via
+    the apple_fm_sdk bindings. The OS owns the model weights — they are NOT loaded
+    into this process — so it is the lightest-weight local brain: no daemon, no
+    multi-GB resident in Aide, instant teardown. Tools, memory, tasks, and recall
+    are shared with the other backends; only inference differs.
+
+    The model is a ~3B on-device model: fast, free, private, and weaker than the
+    Claude default (notably at date math), so it's an opt-in offline brain, not a
+    replacement. Conversation context lives in the live session object across
+    turns; on context overflow the session is rebuilt fresh."""
+
+    def __init__(self, system: str, resume_messages: list[dict] | None = None,
+                 mac: bool = True) -> None:
+        import apple_fm_sdk as fm
+
+        from . import toolkit
+        self._fm = fm
+        self._system = system
+        self.specs, self.dispatch = toolkit.build_toolset(mac=mac)
+        # Curate to the core set: keeps the (instructions + tools) budget safe and
+        # the small model focused. The full dispatch is retained, only the menu
+        # exposed to the model is trimmed.
+        self.specs = [s for s in self.specs if s["function"]["name"] in _APPLE_CORE_TOOLS]
+        self._tools = [_fm_tool(fm, self, s, self.dispatch[s["function"]["name"]])
+                       for s in self.specs]
+        self._model = None
+        self._session = None
+        self._event_q = None
+        self._call_counts: dict[str, int] = {}   # per-turn loop guard
+        self.session_id: str | None = None   # FM keeps context in the session object
+        if resume_messages:
+            log.info("foundation-models backend: in-session continuity only; "
+                     "%d resumed message(s) are not replayed", len(resume_messages))
+
+    def _make_model(self):
+        """Pick the on-device model, or Private Cloud Compute when the user opts
+        in and the installed SDK exposes it. PCC is much stronger (reasoning
+        levels, 32K context, broad knowledge) yet still free and private with no
+        API keys; apple-fm-sdk 0.2.0 ships only the on-device model, so today this
+        falls back to it. When the binding lands, ASSISTANT_APPLE_CLOUD=1 switches
+        over with no code change (its lighter preamble budget can be relaxed then,
+        since PCC handles the full prompt and toolset)."""
+        fm = self._fm
+        if config.APPLE_CLOUD and hasattr(fm, "PrivateCloudComputeLanguageModel"):
+            log.info("apple backend: using the Private Cloud Compute model")
+            return fm.PrivateCloudComputeLanguageModel()
+        if config.APPLE_CLOUD:
+            log.info("apple backend: ASSISTANT_APPLE_CLOUD=1 but this apple-fm-sdk has no "
+                     "PrivateCloudComputeLanguageModel yet; using the on-device model")
+        return fm.SystemLanguageModel()
+
+    def _build_session(self) -> None:
+        fm = self._fm
+        if self._model is None:
+            self._model = self._make_model()
+            ok, reason = self._model.is_available()
+            if not ok:
+                raise RuntimeError(f"Apple Intelligence is unavailable: {reason}")
+        self._session = fm.LanguageModelSession(
+            instructions=self._system, model=self._model, tools=self._tools)
+
+    async def warm(self) -> None:
+        if self._session is None:
+            self._build_session()
+
+    async def run(self, user_text: str):
+        from .util import redact
+
+        self._call_counts = {}              # fresh loop guard each turn
+        if self._session is None:
+            try:
+                self._build_session()
+            except Exception as exc:  # noqa: BLE001
+                async for ev in self._maybe_rescue(user_text, f"local model unavailable ({exc})"):
+                    yield ev
+                    if isinstance(ev, Done):
+                        return
+                yield Text(f"⚠️ {redact(str(exc))}")
+                yield Done("error")
+                return
+
+        q: asyncio.Queue = asyncio.Queue()
+        self._event_q = q
+        END = "__end__"
+
+        async def drive():
+            prev = ""
+            final = ""
+            try:
+                async for snap in self._session.stream_response(user_text):
+                    final = snap
+                    piece = _fm_delta(prev, snap)
+                    prev = snap
+                    if piece:
+                        await q.put(Delta(piece))
+                if final.strip():
+                    await q.put(Text(final))
+                await q.put((END, "success", None))
+            except Exception as exc:  # noqa: BLE001 - classified by the consumer
+                from apple_fm_sdk import ExceededContextWindowSizeError
+                kind = "context" if isinstance(exc, ExceededContextWindowSizeError) else "error"
+                await q.put((END, kind, exc))
+
+        task = asyncio.create_task(drive())
+        try:
+            while True:
+                item = await q.get()
+                if isinstance(item, tuple) and item and item[0] == END:
+                    _, kind, exc = item
+                    if kind == "success":
+                        yield Done("success")
+                    elif kind == "context":
+                        self._session = None     # rebuilt fresh next turn
+                        yield Text("(The local model's context filled up — I started a "
+                                   "fresh session. Please ask that again.)")
+                        yield Done("error")
+                    else:
+                        async for ev in self._maybe_rescue(user_text, f"hit a local error ({exc})"):
+                            yield ev
+                            if isinstance(ev, Done):
+                                return
+                        yield Text(f"⚠️ {redact(str(exc))}")
+                        yield Done("error")
+                    return
+                yield item
+        finally:
+            self._event_q = None
+            if not task.done():
+                task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+
+    async def _maybe_rescue(self, user_text: str, reason: str):
+        """Hand a failed local turn to the Haiku advisor (full tools), same as the
+        Ollama backend. Yields nothing when no advisor is reachable, so the caller
+        falls back to surfacing the error."""
+        if not config.ADVISOR_RESCUE:
+            return
+        from . import advisor
+        if not advisor.available():
+            return
+        yield ToolCall("advisor")
+        yield Delta(f"\n_(local model {reason} — bringing in the Haiku advisor)_\n\n")
+        sub = ClaudeEngine(system_extra=self._extra_for_advisor(), model=config.ADVISOR_MODEL,
+                           effort=None, partial=True)
+        try:
+            async for ev in sub.run(user_text):
+                yield ev
+        finally:
+            await sub.aclose()
+
+    def _extra_for_advisor(self) -> str:
+        return ("\nYou are stepping in for a smaller on-device assistant that could not "
+                "complete this turn. Answer the user directly with full tools.")
+
+    async def aclose(self) -> None:
+        self._session = None
+
+
 # --- factory -----------------------------------------------------------------
 
 def make_engine(*, system_extra: str = "", resume_messages: list[dict] | None = None,
@@ -387,5 +676,21 @@ def make_engine(*, system_extra: str = "", resume_messages: list[dict] | None = 
         return ClaudeEngine(system_extra=extra, resume_session=resume_session,
                             max_turns=max_turns, partial=partial,
                             model=model, effort=effort)
+    if config.BACKEND == "apple":
+        # The on-device model enforces a tight (instructions + tools) budget, so
+        # it gets the compact prompt; see _lean_system_prompt.
+        if config.APPLE_CLOUD:
+            from . import apple_bridge
+            if apple_bridge.available():
+                # Native Swift bridge: on-device today, Private Cloud Compute once
+                # rebuilt against the macOS 27 SDK. Lean prompt while on-device.
+                return apple_bridge.AppleBridgeEngine(
+                    system=system_prompt(extra, lean=True), cloud=True,
+                    mac=sys.platform == "darwin")
+            log.info("apple backend: ASSISTANT_APPLE_CLOUD=1 but bridge/aide-fm is not "
+                     "built; falling back to the in-process on-device engine")
+        return FoundationModelsEngine(system=system_prompt(extra, lean=True),
+                                      resume_messages=resume_messages,
+                                      mac=sys.platform == "darwin")
     return OllamaEngine(system=system_prompt(extra), resume_messages=resume_messages,
                         mac=sys.platform == "darwin")

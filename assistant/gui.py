@@ -10,6 +10,7 @@ import json
 import subprocess
 import sys
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -41,8 +42,30 @@ class Bridge:
         self._turn_fut = None       # in-flight turn future, for the Stop button
         self._connect_lock: asyncio.Lock | None = None
         self.eng_stale = False      # set by new_chat/open_conversation; see _drop_stale
+        self._last_active = time.monotonic()   # for the idle-engine release (B1)
         self.loop = asyncio.new_event_loop()
         threading.Thread(target=self.loop.run_forever, daemon=True).start()
+        # Release the warm engine (and its ~150 MB bundled subprocess) after an
+        # idle stretch; it re-warms lazily on the next message. 0 disables.
+        if config.IDLE_RELEASE_MINUTES:
+            asyncio.run_coroutine_threadsafe(self._idle_watcher(), self.loop)
+
+    async def _idle_watcher(self) -> None:
+        """Drop the engine after IDLE_RELEASE_MINUTES with no activity, so an
+        idle Aide gives back the bundled `claude` subprocess instead of pinning
+        it for the whole session."""
+        threshold = config.IDLE_RELEASE_MINUTES * 60
+        while True:
+            await asyncio.sleep(60)
+            if (self.eng is not None and not self._turn_busy()
+                    and time.monotonic() - self._last_active > threshold):
+                if self._connect_lock is None:
+                    self._connect_lock = asyncio.Lock()
+                async with self._connect_lock:
+                    if self.eng is not None and not self._turn_busy():
+                        log.info("releasing idle engine after %d min",
+                                 config.IDLE_RELEASE_MINUTES)
+                        await self._drop_engine()
 
     def _js(self, fn: str, payload: str) -> None:
         # The window can close between the check and the call (worker thread vs
@@ -140,6 +163,7 @@ class Bridge:
 
     async def _run(self, text: str, persist: bool = True) -> None:
         self._buf = ""
+        self._last_active = time.monotonic()   # a turn counts as activity (B1)
         pending: list[str] = []      # coalesce streamed tokens into ~24-char batches
 
         def flush() -> None:
@@ -190,6 +214,7 @@ class Bridge:
             if "credit balance is too low" in str(exc).lower():
                 self._js("appendText", LOW_CREDIT_TIP)
             self._js("done", "error")
+        self._last_active = time.monotonic()   # reset the idle clock after the turn
         if persist and self.conv_id and self._buf:
             try:
                 history.append(self.conv_id, "assistant", self._buf)
@@ -359,6 +384,45 @@ class Bridge:
             subprocess.run(["open", "-R", str(path)], check=False)
         return str(path)
 
+    # --- proactive feed (Routines panel) ---
+    def proactive_feed(self) -> list:
+        from .proactive import store
+        return store.feed()
+
+    def proactive_unread(self) -> int:
+        from .proactive import store
+        return store.unread_count()
+
+    def proactive_mark_seen(self) -> str:
+        from .proactive import store
+        store.mark_seen()
+        return "ok"
+
+    def proactive_act(self, item_id: int) -> str:
+        """Mark the insight done and hand its suggested action back to JS, which
+        runs it through the normal send() path (so the user bubble renders)."""
+        from .proactive import store
+        item = store.get(int(item_id))
+        if not item:
+            return ""
+        store.mark(int(item_id), "done")
+        return item.get("action_prompt") or item.get("title") or ""
+
+    def proactive_dismiss(self, item_id: int) -> str:
+        from .proactive import store
+        store.mark(int(item_id), "dismissed")
+        return "ok"
+
+    def proactive_snooze(self, item_id: int, hours: float = 3) -> str:
+        from .proactive import store
+        store.snooze(int(item_id), float(hours))
+        return "ok"
+
+    def proactive_feedback(self, item_id: int, good: bool) -> str:
+        from .proactive import store
+        store.set_feedback(int(item_id), bool(good))
+        return "ok"
+
     def new_chat(self) -> str:
         self.conv_id = None
         self.session_id = None
@@ -429,6 +493,54 @@ def _set_app_name(name: str = None) -> None:
             info["CFBundleName"] = name or config.ASSISTANT_NAME
     except Exception:
         pass
+
+
+def _aide_icon_path() -> "object":
+    """Path to the installed Aide.app's icon, or None. The bundle ships an
+    AppIcon.icns (built by scripts/build_app.py); we read it straight from
+    /Applications or ~/Applications rather than depend on being launched from
+    inside the bundle."""
+    from pathlib import Path
+    for base in (Path("/Applications"), Path.home() / "Applications"):
+        icon = base / "Aide.app" / "Contents" / "Resources" / "AppIcon.icns"
+        if icon.is_file():
+            return icon
+    return None
+
+
+def _set_dock_icon() -> None:
+    """Show Aide's icon in the Dock instead of the generic Python rocket.
+
+    The .app wrapper execs the framework Python, so the running process re-binds
+    to Python.app and the Dock would otherwise show Python's icon (the app NAME
+    is already fixed by _set_app_name, but the icon is a separate binding).
+    Setting the icon image on NSApplication overrides the Dock tile for every
+    launch path. Best-effort: no-op off macOS or if the bundle isn't installed.
+    Must run after NSApp exists, so it's called from _post_start."""
+    icon = _aide_icon_path()
+    if icon is None:
+        return
+    try:
+        import AppKit
+    except Exception:
+        return
+
+    def apply() -> None:
+        try:
+            app = AppKit.NSApp()
+            img = AppKit.NSImage.alloc().initWithContentsOfFile_(str(icon))
+            if app is not None and img is not None:
+                app.setApplicationIconImage_(img)
+        except Exception:
+            return
+
+    try:
+        AppKit.NSOperationQueue.mainQueue().addOperationWithBlock_(apply)
+    except Exception:
+        try:
+            apply()
+        except Exception:
+            return
 
 
 def run() -> None:
@@ -677,11 +789,15 @@ def _apply_vibrancy(bridge) -> None:
 
 def _post_start(bridge: Bridge) -> None:
     """After the window is up: connect the agent, wire recall + the ⌥Space hotkey."""
-    bridge.prewarm()
+    # B1: do NOT pre-warm at launch. The engine (and its ~150 MB bundled
+    # subprocess) is built lazily on the first message, and released again after
+    # an idle stretch, so an idle Aide does not pin it. JS may call prewarm() on
+    # input focus for a snappier first reply.
 
     # Give the window the unified native titlebar (traffic lights float over
     # the sidebar's reserved top inset). Safe no-op off macOS / without AppKit.
     if sys.platform == "darwin":
+        _set_dock_icon()
         _style_native_window()
         _apply_vibrancy(bridge)
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # macOS integration via launchd: GUI at login, morning briefing, evening insights,
-# weekly memory consolidation (Sundays 19:00), proactive watcher (every 20 min).
+# weekly memory consolidation (Sundays 19:00), proactive runner (every 15 min).
 # Usage: ./scripts/install_macos.sh [briefing-time HH:MM] [insights-time HH:MM]
 #        (defaults 07:30 and 21:30)
 set -euo pipefail
@@ -12,11 +12,18 @@ GUI_BIN="$(command -v assistant-gui || true)"
 BRIEF_BIN="$(command -v assistant-briefing || true)"
 INSIGHTS_BIN="$(command -v assistant-insights || true)"
 CONSOLIDATE_BIN="$(command -v assistant-consolidate || true)"
-WATCH_BIN="$(command -v assistant-watch || true)"
-[[ -n "$GUI_BIN" && -n "$BRIEF_BIN" && -n "$INSIGHTS_BIN" && -n "$CONSOLIDATE_BIN" && -n "$WATCH_BIN" ]] || { echo "Run: pip install -e '.[gui]' first" >&2; exit 1; }
+PROACTIVE_BIN="$(command -v assistant-proactive || true)"
+[[ -n "$GUI_BIN" && -n "$BRIEF_BIN" && -n "$INSIGHTS_BIN" && -n "$CONSOLIDATE_BIN" && -n "$PROACTIVE_BIN" ]] || { echo "Run: pip install -e '.[gui]' first" >&2; exit 1; }
 
 AGENTS="$HOME/Library/LaunchAgents"; mkdir -p "$AGENTS"
 LOG="${ASSISTANT_HOME:-$HOME/.assistant}"; mkdir -p "$LOG"
+
+# Native "Aide" notifications (its icon + name) need terminal-notifier; without
+# it, osascript posts them as "Script Editor". Best-effort, never fatal.
+if ! command -v terminal-notifier >/dev/null 2>&1 && command -v brew >/dev/null 2>&1; then
+  echo "Installing terminal-notifier (for native Aide notifications)…"
+  brew install terminal-notifier || true
+fi
 
 # XML-escape interpolated values (&, <, >) so a path or token containing XML
 # metacharacters can't produce a malformed plist that launchctl silently rejects.
@@ -42,19 +49,46 @@ launchctl unload "$AGENTS/$1.plist" 2>/dev/null || true
 launchctl load "$AGENTS/$1.plist"
 }
 
-write_plist "com.aide.gui" "$GUI_BIN" "<key>RunAtLoad</key><true/>"
+# Launch the GUI as the Aide.app bundle when it's installed, so the Dock and
+# menu bar read "Aide" with its icon instead of "Python". The console script
+# still works as a fallback (the app just shows the Python identity there).
+APP_BUNDLE="/Applications/Aide.app"
+[[ -d "$APP_BUNDLE" ]] || APP_BUNDLE="$HOME/Applications/Aide.app"
+if [[ -d "$APP_BUNDLE" ]]; then
+  cat > "$AGENTS/com.aide.gui.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.aide.gui</string>
+  <key>ProgramArguments</key><array>
+    <string>/usr/bin/open</string><string>-a</string><string>$(xesc "$APP_BUNDLE")</string>
+  </array>
+  <key>StandardOutPath</key><string>$(xesc "$LOG")/com.aide.gui.log</string>
+  <key>StandardErrorPath</key><string>$(xesc "$LOG")/com.aide.gui.log</string>
+  <key>RunAtLoad</key><true/>
+</dict></plist>
+EOF
+  launchctl unload "$AGENTS/com.aide.gui.plist" 2>/dev/null || true
+  launchctl load "$AGENTS/com.aide.gui.plist"
+else
+  write_plist "com.aide.gui" "$GUI_BIN" "<key>RunAtLoad</key><true/>"
+  echo "  (tip: run 'python scripts/build_app.py' to get the Aide Dock icon)"
+fi
 write_plist "com.aide.briefing" "$BRIEF_BIN" \
   "<key>StartCalendarInterval</key><dict><key>Hour</key><integer>$HOUR</integer><key>Minute</key><integer>$MIN</integer></dict>"
 write_plist "com.aide.insights" "$INSIGHTS_BIN" \
   "<key>StartCalendarInterval</key><dict><key>Hour</key><integer>$IHOUR</integer><key>Minute</key><integer>$IMIN</integer></dict>"
 write_plist "com.aide.consolidate" "$CONSOLIDATE_BIN" \
   "<key>StartCalendarInterval</key><dict><key>Weekday</key><integer>0</integer><key>Hour</key><integer>19</integer><key>Minute</key><integer>0</integer></dict>"
-write_plist "com.aide.watch" "$WATCH_BIN" \
-  "<key>StartInterval</key><integer>1200</integer>"
+write_plist "com.aide.proactive" "$PROACTIVE_BIN" \
+  "<key>StartInterval</key><integer>900</integer>"
+# The old standalone watcher is folded into the proactive runner; remove its job.
+launchctl unload "$AGENTS/com.aide.watch.plist" 2>/dev/null || true
+rm -f "$AGENTS/com.aide.watch.plist"
 
 echo "Installed:"
 echo "  com.aide.gui      — assistant opens at login (⌥Space to summon)"
 echo "  com.aide.briefing — morning briefing at $TIME (notification when ready)"
 echo "  com.aide.insights — evening digest at $ITIME (distills the day into memory)"
 echo "  com.aide.consolidate — weekly memory tidy-up (Sundays 19:00)"
-echo "  com.aide.watch    - proactive check-in every 20 min (notifies only when something needs you)"
+echo "  com.aide.proactive - proactive feed + check-in every 15 min (quiet feed, urgent-only pings)"

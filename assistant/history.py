@@ -10,7 +10,7 @@ import datetime as dt
 import sqlite3
 from contextlib import closing
 
-from . import config
+from . import config, db
 
 
 def _db_path():
@@ -22,16 +22,7 @@ def _now() -> str:
     return dt.datetime.now().isoformat(timespec="seconds")
 
 
-def _conn() -> sqlite3.Connection:
-    db = _db_path()
-    db.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(db)
-    con.row_factory = sqlite3.Row
-    con.execute("PRAGMA journal_mode=WAL")
-    con.execute("PRAGMA synchronous=NORMAL")
-    # The recall observer thread and the main thread write concurrently; wait
-    # out brief lock collisions instead of raising "database is locked".
-    con.execute("PRAGMA busy_timeout=5000")
+def _schema(con: sqlite3.Connection) -> None:
     con.execute(
         "CREATE TABLE IF NOT EXISTS conversations ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, "
@@ -46,11 +37,10 @@ def _conn() -> sqlite3.Connection:
         "CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts "
         "USING fts5(text, conv_id UNINDEXED)"
     )
-    # Migration anchor for future schema changes. v1 is fully described by the
-    # additive CREATE IF NOT EXISTS statements above.
-    if con.execute("PRAGMA user_version").fetchone()[0] == 0:
-        con.execute("PRAGMA user_version=1")
-    return con
+
+
+def _conn() -> sqlite3.Connection:
+    return db.open_db(_db_path(), _schema)
 
 
 def create(title: str = "New chat") -> int:
