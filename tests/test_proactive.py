@@ -156,6 +156,119 @@ def test_parse_all_clear_is_empty():
     assert _parse_insight_lines("", "comms", "feed", "s", "d") == []
 
 
+# --- calendar checks (meeting prep + conflict guard) -------------------------
+
+class _CalCtx:
+    """Minimal stand-in for Context: serves a fixed event list and a canned
+    `ask` reply, so the deterministic check logic is tested without an engine."""
+    def __init__(self, events, now, ask_reply="NONE"):
+        self._events = events
+        self.now = now
+        self._ask_reply = ask_reply
+        self.asked = []
+
+    async def calendar_today(self):
+        return self._events
+
+    async def ask(self, prompt, **kw):
+        self.asked.append(prompt)
+        return self._ask_reply
+
+
+def _ev(h1, m1, h2, m2, title):
+    from assistant.proactive.core import Event
+    day = dt.date(2026, 6, 12)
+    return Event(dt.datetime.combine(day, dt.time(h1, m1)),
+                 dt.datetime.combine(day, dt.time(h2, m2)), title)
+
+
+def test_parse_events_skips_malformed_and_normalizes_tz():
+    from assistant.proactive.core import _parse_events
+
+    text = ("2026-06-12T09:00:00-04:00 | 2026-06-12T10:00:00-04:00 | Standup\n"
+            "- 2026-06-12T11:00:00 | 2026-06-12T11:30:00 | Clinic\n"
+            "no pipes here\n"
+            "2026-06-12T08:00 | not-a-date | Bad\n"
+            "NONE")
+    evs = _parse_events(text)
+    assert [e.title for e in evs] == ["Standup", "Clinic"]      # bad lines dropped
+    assert evs[0].start < evs[1].start                          # sorted
+    assert evs[0].start.tzinfo is None                          # normalized to naive
+
+
+def test_conflict_guard_flags_overlap_and_no_buffer():
+    from assistant.proactive import checks
+
+    events = [
+        _ev(9, 0, 10, 0, "Standup"),
+        _ev(9, 30, 10, 30, "Lecture"),    # overlaps Standup -> notify
+        _ev(11, 0, 11, 30, "Clinic"),     # clean 30-min gap after Lecture
+        _ev(11, 32, 12, 0, "Call"),       # 2 min after Clinic -> no buffer (feed)
+    ]
+    out = asyncio.run(checks.ConflictGuard().arun(_CalCtx(events, dt.datetime(2026, 6, 12, 8))))
+    kinds = {(i.urgency, i.title.split()[0]) for i in out}
+    assert ("notify", "Double-booked") in kinds
+    assert ("feed", "No") in kinds
+    assert len(out) == 2                  # the clean gap produced nothing
+
+
+def test_conflict_guard_clean_schedule_is_silent():
+    from assistant.proactive import checks
+
+    events = [_ev(9, 0, 10, 0, "A"), _ev(10, 30, 11, 0, "B")]   # 30-min buffer
+    out = asyncio.run(checks.ConflictGuard().arun(_CalCtx(events, dt.datetime(2026, 6, 12, 8))))
+    assert out == []
+
+
+def test_meeting_prep_fires_for_imminent_event_with_packet():
+    from assistant.proactive import checks
+
+    events = [_ev(11, 0, 11, 30, "Clinic")]
+    ctx = _CalCtx(events, dt.datetime(2026, 6, 12, 10, 50),   # 10 min out
+                  ask_reply="Attendees: Dr. Lee\nAgenda: rounds")
+    out = asyncio.run(checks.MeetingPrep().arun(ctx))
+    assert len(out) == 1
+    assert out[0].urgency == "notify"
+    assert "Clinic" in out[0].title and "Dr. Lee" in out[0].body
+    assert ctx.asked                                          # it enriched via ask
+
+
+def test_meeting_prep_falls_back_when_packet_empty():
+    from assistant.proactive import checks
+
+    events = [_ev(11, 0, 11, 30, "Clinic")]
+    ctx = _CalCtx(events, dt.datetime(2026, 6, 12, 10, 55), ask_reply="NONE")
+    out = asyncio.run(checks.MeetingPrep().arun(ctx))
+    assert len(out) == 1 and "Starts at" in out[0].body       # bare heads-up
+
+
+def test_meeting_prep_silent_when_nothing_imminent():
+    from assistant.proactive import checks
+
+    events = [_ev(15, 0, 15, 30, "Afternoon thing")]          # hours away
+    ctx = _CalCtx(events, dt.datetime(2026, 6, 12, 10, 0))
+    out = asyncio.run(checks.MeetingPrep().arun(ctx))
+    assert out == [] and ctx.asked == []                      # no event, no engine spend
+
+
+def test_connectors_available_honors_account_connectors(monkeypatch):
+    from assistant import config
+
+    monkeypatch.setattr(config, "auth_available", lambda: True)
+    monkeypatch.setattr(config, "ACCOUNT_CONNECTORS", True)
+    assert config.connectors_available() is True             # account connectors alone suffice
+
+    monkeypatch.setattr(config, "ACCOUNT_CONNECTORS", False)
+    monkeypatch.setattr(config, "load_external_mcp_servers", lambda: {})
+    assert config.connectors_available() is False            # nothing configured
+
+    monkeypatch.setattr(config, "load_external_mcp_servers", lambda: {"gcal": {}})
+    assert config.connectors_available() is True             # external server present
+
+    monkeypatch.setattr(config, "auth_available", lambda: False)
+    assert config.connectors_available() is False            # no auth -> never
+
+
 # --- runner ------------------------------------------------------------------
 
 def test_in_quiet_hours_wraps_midnight(monkeypatch):

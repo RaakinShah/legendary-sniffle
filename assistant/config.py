@@ -294,6 +294,23 @@ def auth_available() -> bool:
     return cfg.is_file() and "oauthAccount" in cfg.read_text()
 
 
+def connectors_available() -> bool:
+    """True if read-only calendar/email tools are reachable this run: either an
+    external gcal/gmail MCP server is configured, or the Claude account
+    connectors are enabled. Either way auth must be present to spend an engine
+    turn. Proactive calendar/email checks gate on this so they don't silently
+    no-op when the connectors moved from mcp_servers.json to the Claude account."""
+    if not auth_available():
+        return False
+    if ACCOUNT_CONNECTORS:
+        return True
+    try:
+        servers = load_external_mcp_servers()
+    except Exception:  # noqa: BLE001 - unreadable config means no external connector
+        return False
+    return bool({"gmail", "gcal"} & set(servers))
+
+
 def ollama_tags() -> tuple[bool, list[str], str]:
     """One probe of the Ollama server: (reachable, installed model names, error).
     Shared by ollama_ready() and the doctor so the server is hit once, not twice."""

@@ -9,11 +9,57 @@ one model connection.
 from __future__ import annotations
 
 import datetime as dt
+from collections import namedtuple
 from dataclasses import dataclass
 
+from .. import config
 from ..log import get_logger
 
 log = get_logger(__name__)
+
+# One timed calendar event, times normalized to local-naive for schedule math.
+Event = namedtuple("Event", "start end title")
+
+_UNSET = object()  # "calendar not fetched yet this cycle" vs. "fetched, none found"
+
+_CAL_PROMPT = (
+    "List my calendar events for {date} using your read-only calendar tool (never "
+    "modify anything). Output ONE line per timed event, EXACTLY this format:\n"
+    "START | END | TITLE\n"
+    "where START and END are ISO-8601 datetimes copied verbatim from the tool "
+    "result. Skip all-day events. Copy the times exactly; never infer or invent an "
+    "event. If there are none, output exactly: NONE. No preamble, no other text."
+)
+
+
+def _parse_event_dt(s: str) -> dt.datetime | None:
+    s = s.strip().replace("Z", "+00:00")
+    try:
+        d = dt.datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    if d.tzinfo is not None:                       # normalize to local-naive
+        d = d.astimezone().replace(tzinfo=None)
+    return d
+
+
+def _parse_events(text: str) -> list[Event]:
+    """Parse `START | END | TITLE` lines into sorted Events. Malformed lines and
+    'NONE' are skipped, so a garbled fetch yields [] (no false conflicts)."""
+    out: list[Event] = []
+    for raw in (text or "").splitlines():
+        line = raw.strip().lstrip("-* ").strip()
+        if not line or line.upper() == "NONE":
+            continue
+        parts = [p.strip() for p in line.split("|")]
+        if len(parts) < 3:
+            continue
+        start, end = _parse_event_dt(parts[0]), _parse_event_dt(parts[1])
+        if not start or not end:
+            continue
+        out.append(Event(start, end, parts[2][:120]))
+    out.sort(key=lambda e: e.start)
+    return out
 
 FEED = "feed"        # lands silently in the Routines feed
 NOTIFY = "notify"    # also pings macOS (time-sensitive only)
@@ -65,6 +111,7 @@ class Context:
         self.now = now or _local_now()
         self.returned_from_away = returned_from_away
         self._engine = None
+        self._events = _UNSET   # today's calendar, fetched once and shared
 
     async def ask(self, prompt: str, *, max_turns: int = 12) -> str:
         """Run one unattended engine turn and return its final text. The engine
@@ -85,6 +132,23 @@ class Context:
             if isinstance(ev, engine.Text):
                 out.append(ev.text)
         return out[-1].strip() if out else ""
+
+    async def calendar_today(self) -> list[Event]:
+        """Today's timed events, fetched once per cycle via the read-only calendar
+        connector and shared across checks. Returns [] when connectors are off or
+        the fetch fails, so callers never reason over half-data."""
+        if self._events is not _UNSET:
+            return self._events
+        self._events = []
+        if not config.connectors_available():
+            return self._events
+        try:
+            raw = await self.ask(
+                _CAL_PROMPT.format(date=self.now.date().isoformat()), max_turns=8)
+            self._events = _parse_events(raw)
+        except Exception:  # noqa: BLE001 - a failed fetch must not sink the cycle
+            log.warning("calendar_today fetch failed", exc_info=True)
+        return self._events
 
     async def aclose(self) -> None:
         if self._engine is not None:

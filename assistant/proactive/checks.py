@@ -195,17 +195,15 @@ def _parse_insight_lines(text: str, category: str, default_urgency: str,
     return out
 
 
-_SWEEP_PROMPT = """Do a read-only check of my email and calendar for things I might be \
-missing in roughly the next 48 hours. Use only read tools (mcp__gcal__*, mcp__gmail__* if \
-available). NEVER send, label, archive, organize, or draft anything.
+_SWEEP_PROMPT = """Do a read-only check of my email (and calendar for cross-checking) for \
+things I might be missing in roughly the next 48 hours. Use only your read-only tools. \
+NEVER send, label, archive, organize, or draft anything.
 
 Look for, and only report when real:
-- a calendar event in the next ~2 hours that I should prep for (who, what)
 - a deadline or commitment mentioned in email that is NOT on my calendar or task list
 - a promise I made in a sent email ("I'll send X by Friday") that needs a task
 - an email I sent that has gone unanswered for days and may need a follow-up
 - an important unanswered email from a real person (not a newsletter/promo)
-- a calendar conflict today (double-booking, or back-to-back with no gap)
 - a bill, renewal, or free-trial ending soon
 - a flight/hotel/reservation confirmation I should turn into calendar entries
 
@@ -222,16 +220,106 @@ class EmailCalendarSweep(Check):
     name, category, cadence = "sweep", "comms", CYCLE
 
     def gate(self, ctx: Context) -> bool:
-        # Only worth an engine turn if a connector is actually configured.
-        try:
-            servers = config.load_external_mcp_servers()
-        except Exception:  # noqa: BLE001
-            return False
-        return bool({"gmail", "gcal"} & set(servers)) and config.auth_available()
+        # Worth an engine turn only when calendar/email read tools are reachable,
+        # whether via an external MCP server or the Claude account connectors.
+        return config.connectors_available()
 
     async def arun(self, ctx: Context) -> list[Insight]:
         text = await ctx.ask(_SWEEP_PROMPT, max_turns=16)
         return _parse_insight_lines(text, "comms", NOTIFY, "sweep", _day(ctx.now))
+
+
+_PREP_PROMPT = """I have a meeting '{title}' at {start} today. Using read-only tools only \
+(never send, draft, or modify anything), give me a tight prep packet in 2-4 short lines:
+- who is attending (from the calendar event)
+- the purpose / agenda
+- the single most recent email thread with those people, if one exists (subject + a \
+one-line gist)
+Only state what the tools actually return; never invent. If there is nothing useful to \
+add, output exactly: NONE. No preamble, no other text."""
+
+
+class MeetingPrep(Check):
+    """A heads-up packet shortly before an event: who, agenda, last email thread.
+    Finds the imminent event deterministically from the shared calendar fetch, so
+    the alert itself can't be hallucinated; only the packet detail is model-written
+    and it falls back to a bare start-time heads-up if enrichment fails."""
+    name, category, cadence = "meeting_prep", "calendar", CYCLE
+
+    def gate(self, ctx: Context) -> bool:
+        return config.connectors_available()
+
+    async def arun(self, ctx: Context) -> list[Insight]:
+        events = await ctx.calendar_today()
+        now = ctx.now
+        # Window is 20 min so every event passes through it on at least one of the
+        # ~15-min cycles; the dedupe key (exact start) keeps it to one ping.
+        soon = [e for e in events if 0 <= (e.start - now).total_seconds() <= 20 * 60]
+        if not soon:
+            return []
+        ev = soon[0]
+        mins = max(0, int((ev.start - now).total_seconds() // 60))
+        clock = ev.start.strftime("%-I:%M %p")
+        packet = ""
+        try:
+            packet = (await ctx.ask(
+                _PREP_PROMPT.format(title=ev.title, start=clock), max_turns=10)).strip()
+        except Exception:  # noqa: BLE001 - still send the bare heads-up
+            log.warning("meeting_prep packet failed", exc_info=True)
+        body = packet if packet and packet.upper() != "NONE" else f"Starts at {clock}."
+        return [Insight(
+            key=f"prep:{ev.start.isoformat(timespec='minutes')}:{ev.title.lower()[:40]}",
+            category="calendar",
+            title=f"In {mins} min: {ev.title}",
+            body=body,
+            urgency=NOTIFY,
+            action_prompt=(f"Give me a fuller prep for my '{ev.title}' meeting: who's "
+                           "coming, the agenda, and the latest email thread with them."),
+            source="calendar, starting soon",
+        )]
+
+
+class ConflictGuard(Check):
+    """Double-booked or back-to-back-with-no-buffer events today. The schedule math
+    is pure Python over the connector's event times, so a conflict is never
+    hallucinated, the model only transcribes the times it's shown."""
+    name, category, cadence = "conflicts", "calendar", CYCLE
+    BUFFER_MIN = 5
+
+    def gate(self, ctx: Context) -> bool:
+        return config.connectors_available()
+
+    async def arun(self, ctx: Context) -> list[Insight]:
+        events = await ctx.calendar_today()
+        out: list[Insight] = []
+        for a, b in zip(events, events[1:]):
+            if b.start < a.end:                                   # overlap
+                out.append(self._insight(a, b, overlap=True))
+            elif (b.start - a.end).total_seconds() / 60 < self.BUFFER_MIN:
+                out.append(self._insight(a, b, overlap=False))    # no buffer
+        return out
+
+    def _insight(self, a, b, *, overlap: bool) -> Insight:
+        at = a.start.strftime("%-I:%M")
+        bt = b.start.strftime("%-I:%M %p")
+        if overlap:
+            title = f"Double-booked at {bt}"
+            body = f"'{a.title}' ({at}) overlaps '{b.title}' ({bt})."
+            urgency = NOTIFY
+        else:
+            title = f"No gap before {b.title}"
+            body = f"'{a.title}' ends right as '{b.title}' begins at {bt}, no buffer."
+            urgency = FEED
+        return Insight(
+            key=f"conflict:{a.start.isoformat(timespec='minutes')}:"
+                f"{b.start.isoformat(timespec='minutes')}",
+            category="calendar",
+            title=title,
+            body=body,
+            urgency=urgency,
+            action_prompt=f"Help me resolve the schedule clash around {bt} today.",
+            source="calendar schedule check",
+        )
 
 
 _STUDY_PROMPT = """Look at what I have been doing on screen recently using recall tools \
@@ -317,6 +405,8 @@ REGISTRY: list[Check] = [
     DueTasks(),
     StaleTaskGardener(),
     ContextResume(),
+    MeetingPrep(),
+    ConflictGuard(),
     EmailCalendarSweep(),
     StudyScan(),
     RabbitHoleSynth(),
