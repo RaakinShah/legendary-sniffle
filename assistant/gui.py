@@ -495,6 +495,54 @@ def _set_app_name(name: str = None) -> None:
         pass
 
 
+def _aide_icon_path() -> "object":
+    """Path to the installed Aide.app's icon, or None. The bundle ships an
+    AppIcon.icns (built by scripts/build_app.py); we read it straight from
+    /Applications or ~/Applications rather than depend on being launched from
+    inside the bundle."""
+    from pathlib import Path
+    for base in (Path("/Applications"), Path.home() / "Applications"):
+        icon = base / "Aide.app" / "Contents" / "Resources" / "AppIcon.icns"
+        if icon.is_file():
+            return icon
+    return None
+
+
+def _set_dock_icon() -> None:
+    """Show Aide's icon in the Dock instead of the generic Python rocket.
+
+    The .app wrapper execs the framework Python, so the running process re-binds
+    to Python.app and the Dock would otherwise show Python's icon (the app NAME
+    is already fixed by _set_app_name, but the icon is a separate binding).
+    Setting the icon image on NSApplication overrides the Dock tile for every
+    launch path. Best-effort: no-op off macOS or if the bundle isn't installed.
+    Must run after NSApp exists, so it's called from _post_start."""
+    icon = _aide_icon_path()
+    if icon is None:
+        return
+    try:
+        import AppKit
+    except Exception:
+        return
+
+    def apply() -> None:
+        try:
+            app = AppKit.NSApp()
+            img = AppKit.NSImage.alloc().initWithContentsOfFile_(str(icon))
+            if app is not None and img is not None:
+                app.setApplicationIconImage_(img)
+        except Exception:
+            return
+
+    try:
+        AppKit.NSOperationQueue.mainQueue().addOperationWithBlock_(apply)
+    except Exception:
+        try:
+            apply()
+        except Exception:
+            return
+
+
 def run() -> None:
     _set_app_name()
     ok, detail = config.backend_ready()
@@ -749,6 +797,7 @@ def _post_start(bridge: Bridge) -> None:
     # Give the window the unified native titlebar (traffic lights float over
     # the sidebar's reserved top inset). Safe no-op off macOS / without AppKit.
     if sys.platform == "darwin":
+        _set_dock_icon()
         _style_native_window()
         _apply_vibrancy(bridge)
 

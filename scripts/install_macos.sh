@@ -42,7 +42,31 @@ launchctl unload "$AGENTS/$1.plist" 2>/dev/null || true
 launchctl load "$AGENTS/$1.plist"
 }
 
-write_plist "com.aide.gui" "$GUI_BIN" "<key>RunAtLoad</key><true/>"
+# Launch the GUI as the Aide.app bundle when it's installed, so the Dock and
+# menu bar read "Aide" with its icon instead of "Python". The console script
+# still works as a fallback (the app just shows the Python identity there).
+APP_BUNDLE="/Applications/Aide.app"
+[[ -d "$APP_BUNDLE" ]] || APP_BUNDLE="$HOME/Applications/Aide.app"
+if [[ -d "$APP_BUNDLE" ]]; then
+  cat > "$AGENTS/com.aide.gui.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.aide.gui</string>
+  <key>ProgramArguments</key><array>
+    <string>/usr/bin/open</string><string>-a</string><string>$(xesc "$APP_BUNDLE")</string>
+  </array>
+  <key>StandardOutPath</key><string>$(xesc "$LOG")/com.aide.gui.log</string>
+  <key>StandardErrorPath</key><string>$(xesc "$LOG")/com.aide.gui.log</string>
+  <key>RunAtLoad</key><true/>
+</dict></plist>
+EOF
+  launchctl unload "$AGENTS/com.aide.gui.plist" 2>/dev/null || true
+  launchctl load "$AGENTS/com.aide.gui.plist"
+else
+  write_plist "com.aide.gui" "$GUI_BIN" "<key>RunAtLoad</key><true/>"
+  echo "  (tip: run 'python scripts/build_app.py' to get the Aide Dock icon)"
+fi
 write_plist "com.aide.briefing" "$BRIEF_BIN" \
   "<key>StartCalendarInterval</key><dict><key>Hour</key><integer>$HOUR</integer><key>Minute</key><integer>$MIN</integer></dict>"
 write_plist "com.aide.insights" "$INSIGHTS_BIN" \
