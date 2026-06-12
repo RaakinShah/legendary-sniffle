@@ -18,6 +18,13 @@ PROACTIVE_BIN="$(command -v assistant-proactive || true)"
 AGENTS="$HOME/Library/LaunchAgents"; mkdir -p "$AGENTS"
 LOG="${ASSISTANT_HOME:-$HOME/.assistant}"; mkdir -p "$LOG"
 
+# Native "Aide" notifications (its icon + name) need terminal-notifier; without
+# it, osascript posts them as "Script Editor". Best-effort, never fatal.
+if ! command -v terminal-notifier >/dev/null 2>&1 && command -v brew >/dev/null 2>&1; then
+  echo "Installing terminal-notifier (for native Aide notifications)…"
+  brew install terminal-notifier || true
+fi
+
 # XML-escape interpolated values (&, <, >) so a path or token containing XML
 # metacharacters can't produce a malformed plist that launchctl silently rejects.
 xesc() { local s="$1"; s="${s//&/&amp;}"; s="${s//</&lt;}"; s="${s//>/&gt;}"; printf '%s' "$s"; }
