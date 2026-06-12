@@ -158,12 +158,13 @@ async def main() -> None:
         except Exception:  # noqa: BLE001 - one bad check never sinks the cycle
             log.exception("proactive check %s failed", check.name)
 
+    used_engine = ctx.used_engine  # read before aclose() nulls the engine
     await ctx.aclose()
     store.prune()
 
     fresh = [ins for ins in insights if store.add(ins)]
     log.info("proactive cycle: %d insights, %d new (engine=%s)",
-             len(insights), len(fresh), ctx.used_engine)
+             len(insights), len(fresh), used_engine)
 
     # Pings draw from the store's pending queue (not just this cycle's adds) so a
     # ping held back during quiet hours or a focus app fires on a later clear run.
