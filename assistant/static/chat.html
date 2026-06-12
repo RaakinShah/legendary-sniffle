@@ -345,6 +345,21 @@
   #top .ctl.off { color: var(--warn-text); }
   #top .ctl.off .slash { display: inline !important; }
 
+  /* Panel-header controls (context + feed). Without this they fall back to the
+     browser's default button box with an unsized, invisible icon — they read as
+     empty buttons. Match the top-bar controls; the close reads as a red X. */
+  .ctxHead .ctl, .feedHead .ctl {
+    width: 28px; height: 28px; border: none; border-radius: var(--r-md);
+    background: transparent; color: var(--text-2); cursor: pointer;
+    display: grid; place-items: center;
+    transition: background .14s var(--ease), color .14s var(--ease);
+  }
+  .ctxHead .ctl:hover, .feedHead .ctl:hover { background: var(--fill); color: var(--text); }
+  .ctxHead .ctl:focus-visible, .feedHead .ctl:focus-visible { box-shadow: 0 0 0 2px var(--accent-ring); }
+  .ctxHead .ctl svg, .feedHead .ctl svg { width: 16px; height: 16px; stroke: currentColor; }
+  #ctxClose, #feedClose { color: var(--danger); }
+  #ctxClose:hover, #feedClose:hover { background: var(--danger-bg); color: var(--danger); }
+
   #log {
     flex: 1; overflow-y: auto; padding: var(--s2) var(--s7) var(--s5);
     scroll-behavior: smooth;
