@@ -55,6 +55,24 @@ def test_store_notify_priority_ordering():
     assert titles[0] == "Ping"                       # notify sorts first
 
 
+def test_store_pending_pings_excludes_feed_seen_and_notified():
+    from assistant.proactive import store
+
+    store.add(_ins(key="n1", title="Notify one", urgency="notify"))
+    store.add(_ins(key="n2", title="Notify two", urgency="notify"))
+    store.add(_ins(key="f1", title="Feed only", urgency="feed"))
+
+    pending = store.pending_pings(10)
+    assert {p["title"] for p in pending} == {"Notify one", "Notify two"}  # feed excluded
+
+    store.mark_notified([pending[0]["id"]])
+    titles = {p["title"] for p in store.pending_pings(10)}
+    assert titles == {"Notify two"}                  # a pinged item drops out
+
+    store.mark_seen()                                # user opens the feed
+    assert store.pending_pings(10) == []             # seen items never ping after
+
+
 # --- deterministic checks ----------------------------------------------------
 
 def test_stale_task_gardener_flags_old_undated_tasks(monkeypatch):
@@ -158,6 +176,7 @@ def test_runner_routes_notify_and_feed(monkeypatch):
     pings = []
     monkeypatch.setattr(run.notify, "notify", lambda title, msg: pings.append((title, msg)))
     monkeypatch.setattr(run, "_in_quiet_hours", lambda now: False)
+    monkeypatch.setattr(run, "_focus_app", lambda: "")       # not in a focus app
     monkeypatch.setattr(run.config, "backend_ready", lambda: (True, "ok"))
 
     class FakeCheck:
@@ -197,3 +216,53 @@ def test_runner_suppresses_pings_in_quiet_hours(monkeypatch):
     asyncio.run(run.main())
     assert pings == []                                  # no ping during quiet hours
     assert any(f["title"] == "Urgent" for f in store.feed())  # still in the feed
+
+
+def test_focus_app_matches_substring_case_insensitively(monkeypatch):
+    from assistant import config
+    from assistant.proactive import run
+
+    monkeypatch.setattr(config, "FOCUS_APPS", frozenset({"zoom.us", "xcode"}))
+    monkeypatch.setattr(run.sys, "platform", "darwin")
+    monkeypatch.setattr("assistant.observer._frontmost_app", lambda: "zoom.us")
+    assert run._focus_app() == "zoom.us"
+    monkeypatch.setattr("assistant.observer._frontmost_app", lambda: "Mail")
+    assert run._focus_app() == ""                       # not a focus app
+    monkeypatch.setattr(config, "FOCUS_APPS", frozenset())
+    monkeypatch.setattr("assistant.observer._frontmost_app", lambda: "zoom.us")
+    assert run._focus_app() == ""                       # empty list disables silence
+
+
+def test_runner_focus_holds_ping_then_releases(monkeypatch):
+    """A notify item raised while a focus app is frontmost waits in the feed and
+    pings on the next cycle once the user has left the focus app."""
+    from assistant.proactive import run, store
+    from assistant.proactive.core import Insight
+
+    pings = []
+    monkeypatch.setattr(run.notify, "notify", lambda title, msg: pings.append(title))
+    monkeypatch.setattr(run, "_in_quiet_hours", lambda now: False)
+    monkeypatch.setattr(run.config, "backend_ready", lambda: (True, "ok"))
+
+    class FakeCheck:
+        name, category, cadence = "fake", "test", "cycle"
+        def gate(self, ctx): return True
+        def run(self, ctx):
+            return [Insight(key="m1", category="test", title="Meeting prep",
+                            body="standup", urgency="notify")]
+
+    monkeypatch.setattr(run.checks, "active_checks", lambda: [FakeCheck()])
+
+    # Cycle 1: in a focus app (e.g. Zoom) -> the ping is held, item still feeds.
+    monkeypatch.setattr(run, "_focus_app", lambda: "zoom.us")
+    asyncio.run(run.main())
+    assert pings == []
+    assert any(f["title"] == "Meeting prep" for f in store.feed())
+    assert [p["title"] for p in store.pending_pings(10)] == ["Meeting prep"]
+
+    # Cycle 2: left the focus app -> the held ping fires (deduped from the feed,
+    # so the check adds nothing new, but the pending ping still drains).
+    monkeypatch.setattr(run, "_focus_app", lambda: "")
+    asyncio.run(run.main())
+    assert pings == ["Aide: Meeting prep"]
+    assert store.pending_pings(10) == []                # drained, won't ping twice

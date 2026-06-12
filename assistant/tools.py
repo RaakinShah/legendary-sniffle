@@ -196,6 +196,29 @@ async def recall_chats(args: dict[str, Any]) -> dict[str, Any]:
 
 
 @tool(
+    name="tag_file",
+    description=(
+        "Write a short summary onto a file's macOS Spotlight metadata (its Finder "
+        "comment) so the user can find the file later by concept, even when those "
+        "words aren't in the file's text. Use after you read or summarize a dense "
+        "document the user will want to resurface: a PDF, a paper, a slide deck. "
+        "The summary should be a few concept-rich keywords/phrases, not prose."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "File to tag (~ is expanded)"},
+            "summary": {"type": "string", "description": "Concept-rich keywords to make searchable"},
+        },
+        "required": ["path", "summary"],
+    },
+)
+async def tag_file(args: dict[str, Any]) -> dict[str, Any]:
+    out = await toolcore.tag_file(args)
+    return _text(out, is_error=out.startswith(("No such file", "Could not", "tag_file only")))
+
+
+@tool(
     name="think_harder",
     description=(
         "Bring in a stronger model for a hard sub-problem instead of guessing. Use when a "
@@ -226,5 +249,5 @@ def build_server():
         version="1.0.0",
         tools=[add_task, list_tasks, complete_task, delete_task, due_tasks,
                remember, update_memory, forget_fact, journal, recall_chats,
-               think_harder],
+               tag_file, think_harder],
     )

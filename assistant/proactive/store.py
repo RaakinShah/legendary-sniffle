@@ -33,6 +33,13 @@ def _schema(con: sqlite3.Connection) -> None:
         "status TEXT DEFAULT 'new', created_at TEXT, snooze_until TEXT, feedback INTEGER)"
     )
     con.execute("CREATE INDEX IF NOT EXISTS idx_feed_key ON feed(key)")
+    # Focus-aware silence: a notify item suppressed by quiet hours or a focus app
+    # must ping on a later clear cycle, not vanish. `notified_at` records that the
+    # ping has actually fired; until then the item is a pending ping. Added by
+    # migration so feeds created before this feature pick the column up in place.
+    cols = {r[1] for r in con.execute("PRAGMA table_info(feed)")}
+    if "notified_at" not in cols:
+        con.execute("ALTER TABLE feed ADD COLUMN notified_at TEXT")
 
 
 def _conn() -> sqlite3.Connection:
@@ -62,6 +69,34 @@ def add(ins: Insight) -> bool:
              ins.action_prompt, ins.source, _now()),
         )
     return True
+
+
+def pending_pings(limit: int) -> list[dict]:
+    """Notify-urgency items that haven't pinged yet and are still unread, oldest
+    first. These are the deferred pings: an item suppressed by quiet hours or a
+    focus app waits here until a cycle is clear to notify. Once the user opens
+    the feed (new -> seen) an item drops out — they've already seen it, so no
+    after-the-fact ping. Oldest-first so a backlog drains instead of starving."""
+    with closing(_conn()) as con, con:
+        rows = con.execute(
+            "SELECT * FROM feed WHERE urgency = 'notify' AND status = 'new' "
+            "AND notified_at IS NULL ORDER BY created_at ASC LIMIT ?",
+            (int(limit),),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def mark_notified(ids) -> None:
+    """Stamp the given feed rows as pinged so they aren't notified again."""
+    ids = [int(i) for i in ids]
+    if not ids:
+        return
+    placeholders = ",".join("?" * len(ids))
+    with closing(_conn()) as con, con:
+        con.execute(
+            f"UPDATE feed SET notified_at = ? WHERE id IN ({placeholders})",
+            (_now(), *ids),
+        )
 
 
 def feed(limit: int = 50, include_resolved: bool = False) -> list[dict]:

@@ -16,6 +16,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+# On-device Apple Foundation model backend (ASSISTANT_BACKEND=apple); macOS 26+
+# with Apple Intelligence enabled. The OS owns the weights, so nothing heavy is
+# pulled into the app process.
+apple = ["apple-fm-sdk>=0.2,<1; sys_platform == 'darwin'"]
 gui = [
     "pywebview>=5.0,<7",
     "pynput>=1.7,<2",

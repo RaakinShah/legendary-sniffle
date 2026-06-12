@@ -54,6 +54,7 @@ _update_memory = toolcore.update_memory
 _forget_fact = toolcore.forget_fact
 _journal = toolcore.journal
 _recall_chats = toolcore.recall_chats
+_tag_file = toolcore.tag_file
 
 
 # --- system tools (shell / files / web) -------------------------------------
@@ -325,6 +326,11 @@ _MAC: list[tuple[dict, Callable[[dict], Awaitable[str]]]] = [
     (_spec("recall_pause", "Pause or resume ambient recall.", {"paused": {"type": "boolean"}}, ["paused"]), _recall_pause),
     (_spec("recall_forget", "Erase recent ambient recall. hours=0 erases everything.",
            {"hours": {"type": "number"}}, ["hours"]), _recall_forget),
+    (_spec("tag_file", "Write a concept-rich summary onto a file's Spotlight metadata "
+           "(Finder comment) so the user can find it later by concept even when those "
+           "words aren't in the file. Use after summarizing a dense document.",
+           {"path": _S, "summary": {**_S, "description": "concept-rich keywords to make searchable"}},
+           ["path", "summary"]), _tag_file),
 ]
 
 _ADVISOR: list[tuple[dict, Callable[[dict], Awaitable[str]]]] = [

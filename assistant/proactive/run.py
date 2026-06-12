@@ -16,7 +16,7 @@ import sys
 from .. import config, notify
 from ..log import get_logger
 from . import checks, store
-from .core import CYCLE, DAILY, HOURLY, NOTIFY, ON_WAKE, WEEKLY, Context
+from .core import CYCLE, DAILY, HOURLY, ON_WAKE, WEEKLY, Context
 
 log = get_logger(__name__)
 
@@ -35,6 +35,40 @@ def _in_quiet_hours(now: dt.datetime) -> bool:
     if QUIET_START <= QUIET_END:
         return QUIET_START <= h < QUIET_END
     return h >= QUIET_START or h < QUIET_END   # window wraps midnight
+
+
+def _focus_app() -> str:
+    """Frontmost app name if it's one the user is focused in (a meeting/shared
+    screen, presenting, or deep work) — pings hold while it's up. "" when nothing
+    matches or off-platform. No subprocess: NSWorkspace reads the name in-process."""
+    if sys.platform != "darwin" or not config.FOCUS_APPS:
+        return ""
+    try:
+        from .. import observer
+        app = observer._frontmost_app()
+    except Exception:  # noqa: BLE001 - a failed read just means "don't suppress"
+        return ""
+    low = app.lower()
+    return app if app and any(f in low for f in config.FOCUS_APPS) else ""
+
+
+def _maybe_ping(now: dt.datetime) -> None:
+    """Fire macOS notifications for pending notify-items, unless suppressed.
+    Suppression — quiet hours, or a focus app frontmost — DEFERS the ping rather
+    than dropping it: the item stays pending (notified_at NULL) and pings on a
+    later clear cycle. An item the user has already opened in the feed leaves the
+    pending set on its own, so it is never pinged after the fact."""
+    if _in_quiet_hours(now):
+        return
+    focus = _focus_app()
+    if focus:
+        log.info("holding proactive pings: %s is frontmost (focus-aware silence)", focus)
+        return
+    pending = store.pending_pings(MAX_PINGS_PER_CYCLE)
+    for ins in pending:
+        notify.notify(f"Aide: {ins['title']}", (ins.get("body") or "")[:120])
+    if pending:
+        store.mark_notified([p["id"] for p in pending])
 
 
 def _load_state() -> dict:
@@ -131,10 +165,9 @@ async def main() -> None:
     log.info("proactive cycle: %d insights, %d new (engine=%s)",
              len(insights), len(fresh), ctx.used_engine)
 
-    pings = [ins for ins in fresh if ins.urgency == NOTIFY]
-    if pings and not _in_quiet_hours(now):
-        for ins in pings[:MAX_PINGS_PER_CYCLE]:
-            notify.notify(f"Aide: {ins.title}", (ins.body or "")[:120])
+    # Pings draw from the store's pending queue (not just this cycle's adds) so a
+    # ping held back during quiet hours or a focus app fires on a later clear run.
+    _maybe_ping(now)
 
     _save_state(state)
 

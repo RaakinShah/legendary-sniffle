@@ -96,10 +96,19 @@ EFFORT = os.environ.get("ASSISTANT_EFFORT", "high")
 #                        small model hallucinates, so it's opt-in, not the default.
 # Both share the same tools, memory, tasks, and recall; only the engine differs.
 BACKEND = os.environ.get("ASSISTANT_BACKEND", "claude").strip().lower()
-if BACKEND not in ("claude", "ollama"):
-    print(f"warning: ASSISTANT_BACKEND={BACKEND!r} is not 'claude' or 'ollama'; "
+# "apple" = the on-device Apple Foundation model (macOS 26+, Apple Intelligence).
+BACKEND = {"foundation": "apple", "fm": "apple", "apple-fm": "apple"}.get(BACKEND, BACKEND)
+if BACKEND not in ("claude", "ollama", "apple"):
+    print(f"warning: ASSISTANT_BACKEND={BACKEND!r} is not 'claude', 'ollama', or 'apple'; "
           "using 'claude'", file=sys.stderr)
     BACKEND = "claude"
+
+# Opt the apple backend into Apple's Private Cloud Compute model — far more
+# capable (Light/Moderate/Deep reasoning, 32K context, broad knowledge), still
+# free, private, and key-less. It fronts the same LanguageModelSession API, so
+# Aide adopts it with no code change the moment apple-fm-sdk exposes the binding;
+# until then this safely falls back to the on-device model.
+APPLE_CLOUD = os.environ.get("ASSISTANT_APPLE_CLOUD", "0").strip().lower() in ("1", "true", "on", "yes")
 
 # Local (Ollama) settings. The model must support tool calling.
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
@@ -174,6 +183,25 @@ ESCALATE_EFFORT = os.environ.get("ASSISTANT_ESCALATE_EFFORT", "high").strip()
 # after this many idle minutes; it re-warms lazily on the next message. 0 keeps
 # it resident for the whole session (snappier first reply, more idle RAM).
 IDLE_RELEASE_MINUTES = _int_env("ASSISTANT_IDLE_RELEASE_MIN", 10, 0, 240)
+
+
+# Focus-aware proactive silence: when one of these apps is frontmost, the
+# proactive runner holds back notification pings (the finding still lands in the
+# feed; it pings once you leave the focus app). Aimed at moments where a banner
+# is genuinely disruptive — a meeting or shared screen, presenting, or deep work
+# — not at background video (his normal study state). Case-insensitive substring
+# match on the frontmost app name. Override the whole list with
+# ASSISTANT_FOCUS_APPS (comma-separated); set it empty to disable the silence.
+_FOCUS_DEFAULT = (
+    "zoom.us,Zoom,Microsoft Teams,Webex,Google Meet,Around,"   # meetings / shared screen
+    "Keynote,Microsoft PowerPoint,"                              # presenting
+    "Xcode,Terminal,iTerm2"                                      # deep work / long builds
+)
+FOCUS_APPS = frozenset(
+    x.strip().lower()
+    for x in os.environ.get("ASSISTANT_FOCUS_APPS", _FOCUS_DEFAULT).split(",")
+    if x.strip()
+)
 
 
 def escalation_available() -> bool:
@@ -289,10 +317,28 @@ def ollama_ready() -> tuple[bool, str]:
     return False, f"model {OLLAMA_MODEL} not installed (run: ollama pull {OLLAMA_MODEL})"
 
 
+def apple_ready() -> tuple[bool, str]:
+    """Whether the Apple on-device Foundation model can run here."""
+    if sys.platform != "darwin":
+        return False, "the Apple backend needs macOS 26+ on Apple silicon"
+    try:
+        import apple_fm_sdk as fm
+    except ImportError:
+        return False, "apple-fm-sdk not installed (pip install apple-fm-sdk)"
+    try:
+        ok, reason = fm.SystemLanguageModel().is_available()
+    except Exception as exc:  # noqa: BLE001
+        return False, f"Apple Foundation model error: {exc}"
+    return (True, "Apple on-device model ready") if ok else \
+        (False, f"Apple Intelligence unavailable: {reason or 'enable it in System Settings'}")
+
+
 def backend_ready() -> tuple[bool, str]:
     """Whether the configured backend can actually run. (ok, human-readable detail)."""
     if BACKEND == "claude":
         return (True, "Claude credentials present") if auth_available() else (False, AUTH_HELP)
+    if BACKEND == "apple":
+        return apple_ready()
     return ollama_ready()
 
 

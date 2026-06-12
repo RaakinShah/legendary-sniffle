@@ -18,4 +18,7 @@ def isolated_home(tmp_path, monkeypatch):
     # escalation_available() true). Tests that need them opt back in.
     monkeypatch.setattr(config, "ADVISOR", False)
     monkeypatch.setattr(config, "ESCALATE", False)
+    # Pin the backend so a developer's .env (e.g. ASSISTANT_BACKEND=apple) can't
+    # change test outcomes. Tests that exercise another backend set it themselves.
+    monkeypatch.setattr(config, "BACKEND", "claude")
     yield
